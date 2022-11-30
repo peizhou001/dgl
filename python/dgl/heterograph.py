@@ -22,6 +22,7 @@ from .view import HeteroNodeView, HeteroNodeDataView, HeteroEdgeView, HeteroEdge
 
 __all__ = ['DGLGraph', 'combine_names']
 
+
 class DGLGraph(object):
     """Class for storing graph structure and node/edge feature data.
 
@@ -101,8 +102,8 @@ class DGLGraph(object):
                 raise ValueError('Invalid input. The metagraph must be a uni-directional'
                                  ' bipartite graph.')
             self._ntypes = ntypes[0] + ntypes[1]
-            self._srctypes_invmap = {t : i for i, t in enumerate(ntypes[0])}
-            self._dsttypes_invmap = {t : i + len(ntypes[0]) for i, t in enumerate(ntypes[1])}
+            self._srctypes_invmap = {t: i for i, t in enumerate(ntypes[0])}
+            self._dsttypes_invmap = {t: i + len(ntypes[0]) for i, t in enumerate(ntypes[1])}
             self._is_unibipartite = True
             if len(ntypes[0]) == 1 and len(ntypes[1]) == 1 and len(etypes) == 1:
                 self._canonical_etypes = [(ntypes[0][0], etypes[0], ntypes[1][0])]
@@ -116,7 +117,7 @@ class DGLGraph(object):
             if self._is_unibipartite:
                 self._srctypes_invmap, self._dsttypes_invmap = src_dst_map
             else:
-                self._srctypes_invmap = {t : i for i, t in enumerate(self._ntypes)}
+                self._srctypes_invmap = {t: i for i, t in enumerate(self._ntypes)}
                 self._dsttypes_invmap = self._srctypes_invmap
 
         # Handle edge types
@@ -137,7 +138,7 @@ class DGLGraph(object):
                 self._etype2canonical[ety] = tuple()
             else:
                 self._etype2canonical[ety] = self._canonical_etypes[i]
-        self._etypes_invmap = {t : i for i, t in enumerate(self._canonical_etypes)}
+        self._etypes_invmap = {t: i for i, t in enumerate(self._canonical_etypes)}
 
         # node and edge frame
         if node_frames is None:
@@ -186,16 +187,16 @@ class DGLGraph(object):
             ret = ('Graph(num_nodes={node},\n'
                    '      num_edges={edge},\n'
                    '      metagraph={meta})')
-            nnode_dict = {self.ntypes[i] : self._graph.number_of_nodes(i)
+            nnode_dict = {self.ntypes[i]: self._graph.number_of_nodes(i)
                           for i in range(len(self.ntypes))}
-            nedge_dict = {self.canonical_etypes[i] : self._graph.number_of_edges(i)
+            nedge_dict = {self.canonical_etypes[i]: self._graph.number_of_edges(i)
                           for i in range(len(self.etypes))}
             meta = str(self.metagraph().edges(keys=True))
             return ret.format(node=nnode_dict, edge=nedge_dict, meta=meta)
 
     def __copy__(self):
         """Shallow copy implementation."""
-        #TODO(minjie): too many states in python; should clean up and lower to C
+        # TODO(minjie): too many states in python; should clean up and lower to C
         cls = type(self)
         obj = cls.__new__(cls)
         obj.__dict__.update(self.__dict__)
@@ -323,10 +324,10 @@ class DGLGraph(object):
                 u, v = self.edges(form='uv', order='eid', etype=c_etype)
                 hgidx = heterograph_index.create_unitgraph_from_coo(
                     1 if c_etype[0] == c_etype[2] else 2,
-                    self.number_of_nodes(c_etype[0]) + \
-                        (num if self.get_ntype_id(c_etype[0]) == ntid else 0),
-                    self.number_of_nodes(c_etype[2]) + \
-                        (num if self.get_ntype_id(c_etype[2]) == ntid else 0),
+                    self.number_of_nodes(c_etype[0]) +
+                    (num if self.get_ntype_id(c_etype[0]) == ntid else 0),
+                    self.number_of_nodes(c_etype[2]) +
+                    (num if self.get_ntype_id(c_etype[2]) == ntid else 0),
                     u,
                     v,
                     ['coo', 'csr', 'csc'])
@@ -615,7 +616,7 @@ class DGLGraph(object):
         # TODO(xiangsx): block do not support remove_edges
         if etype is None:
             if self._graph.number_of_etypes() != 1:
-                raise DGLError('Edge type name must be specified if there are more than one ' \
+                raise DGLError('Edge type name must be specified if there are more than one '
                                'edge types.')
         eids = utils.prepare_tensor(self, eids, 'u')
         if len(eids) == 0:
@@ -647,7 +648,7 @@ class DGLGraph(object):
             batch_num_removed_edges = segment.segment_reduce(c_etype_batch_num_edges,
                                                              one_hot_removed_edges, reducer='sum')
             self._batch_num_edges[c_etype] = c_etype_batch_num_edges - \
-                                             F.astype(batch_num_removed_edges, F.int64)
+                F.astype(batch_num_removed_edges, F.int64)
 
         sub_g = self.edge_subgraph(edges, relabel_nodes=False, store_ids=store_ids)
         self._graph = sub_g._graph
@@ -741,7 +742,7 @@ class DGLGraph(object):
         # TODO(xiangsx): block do not support remove_nodes
         if ntype is None:
             if self._graph.number_of_ntypes() != 1:
-                raise DGLError('Node type name must be specified if there are more than one ' \
+                raise DGLError('Node type name must be specified if there are more than one '
                                'node types.')
 
         nids = utils.prepare_tensor(self, nids, 'u')
@@ -773,7 +774,7 @@ class DGLGraph(object):
             batch_num_removed_nodes = segment.segment_reduce(
                 c_ntype_batch_num_nodes, one_hot_removed_nodes, reducer='sum')
             self._batch_num_nodes[target_ntype] = c_ntype_batch_num_nodes - \
-                                                  F.astype(batch_num_removed_nodes, F.int64)
+                F.astype(batch_num_removed_nodes, F.int64)
             # Record old num_edges to check later whether some edges were removed
             old_num_edges = {c_etype: self._graph.number_of_edges(self.get_etype_id(c_etype))
                              for c_etype in self.canonical_etypes}
@@ -817,7 +818,6 @@ class DGLGraph(object):
         """
         self._batch_num_nodes = None
         self._batch_num_edges = None
-
 
     #################################################################
     # Metagraph query
@@ -1449,7 +1449,7 @@ class DGLGraph(object):
         if not isinstance(val, Mapping):
             if len(self.ntypes) != 1:
                 raise DGLError('Must provide a dictionary when there are multiple node types.')
-            val = {self.ntypes[0] : val}
+            val = {self.ntypes[0]: val}
         self._batch_num_nodes = val
 
     def batch_num_edges(self, etype=None):
@@ -1594,7 +1594,7 @@ class DGLGraph(object):
         if not isinstance(val, Mapping):
             if len(self.etypes) != 1:
                 raise DGLError('Must provide a dictionary when there are multiple edge types.')
-            val = {self.canonical_etypes[0] : val}
+            val = {self.canonical_etypes[0]: val}
         self._batch_num_edges = val
 
     #################################################################
@@ -3085,7 +3085,7 @@ class DGLGraph(object):
         if F.as_scalar(F.sum(self.has_nodes(v, ntype=dsttype), dim=0)) != len(v):
             raise DGLError('v contains invalid node IDs')
         if force_multi is not None:
-            dgl_warning("force_multi will be deprecated, " \
+            dgl_warning("force_multi will be deprecated, "
                         "Please use return_uv instead")
             return_uv = force_multi
 
@@ -4800,7 +4800,8 @@ class DGLGraph(object):
                    message_func,
                    reduce_func,
                    apply_node_func=None,
-                   etype=None):
+                   etype=None,
+                   efeats_redirected=None):
         """Send messages along all the edges of the specified type
         and update all the nodes of the corresponding destination type.
 
@@ -4892,7 +4893,8 @@ class DGLGraph(object):
             etype = self.canonical_etypes[etid]
             _, dtid = self._graph.metagraph.find_edge(etid)
             g = self if etype is None else self[etype]
-            ndata = core.message_passing(g, message_func, reduce_func, apply_node_func)
+            ndata = core.message_passing(g, message_func, reduce_func, apply_node_func,
+                                         efeats_redirected)
             if core.is_builtin(reduce_func) and reduce_func.name in ['min', 'max'] and ndata:
                 # Replace infinity with zero for isolated nodes
                 key = list(ndata.keys())[0]
@@ -4908,7 +4910,8 @@ class DGLGraph(object):
                                           "operators as 'mean' using update_all. Please use "
                                           "multi_update_all instead.")
             g = self
-            all_out = core.message_passing(g, message_func, reduce_func, apply_node_func)
+            all_out = core.message_passing(g, message_func, reduce_func, apply_node_func,
+                                           efeats_redirected)
             key = list(all_out.keys())[0]
             out_tensor_tuples = all_out[key]
 
@@ -5026,15 +5029,13 @@ class DGLGraph(object):
             # merge by cross_reducer
             out = reduce_dict_data(frames, cross_reducer, merge_order[dtid])
             # Replace infinity with zero for isolated nodes when reducer is min/max
-            if  core.is_builtin(rfunc) and rfunc.name in ['min', 'max']:
+            if core.is_builtin(rfunc) and rfunc.name in ['min', 'max']:
                 key = list(out.keys())[0]
                 out[key] = F.replace_inf_with_zero(out[key]) if out[key] is not None else None
             self._node_frames[dtid].update(out)
             # apply
             if apply_node_func is not None:
                 self.apply_nodes(apply_node_func, ALL, self.ntypes[dtid])
-
-
 
     #################################################################
     # Message propagation
@@ -5246,7 +5247,7 @@ class DGLGraph(object):
             raise DGLError('v contains invalid node IDs')
 
         with self.local_scope():
-            self.apply_nodes(lambda nbatch: {'_mask' : predicate(nbatch)}, nodes, ntype)
+            self.apply_nodes(lambda nbatch: {'_mask': predicate(nbatch)}, nodes, ntype)
             ntype = self.ntypes[0] if ntype is None else ntype
             mask = self.nodes[ntype].data['_mask']
             if is_all(nodes):
@@ -5353,7 +5354,7 @@ class DGLGraph(object):
             raise ValueError('Unsupported type of edges:', type(edges))
 
         with self.local_scope():
-            self.apply_edges(lambda ebatch: {'_mask' : predicate(ebatch)}, edges, etype)
+            self.apply_edges(lambda ebatch: {'_mask': predicate(ebatch)}, edges, etype)
             etype = self.canonical_etypes[0] if etype is None else etype
             mask = self.edges[etype].data['_mask']
             if is_all(edges):
@@ -5461,11 +5462,11 @@ class DGLGraph(object):
 
         # 2. Copy misc info
         if self._batch_num_nodes is not None:
-            new_bnn = {k : F.copy_to(num, device, **kwargs)
+            new_bnn = {k: F.copy_to(num, device, **kwargs)
                        for k, num in self._batch_num_nodes.items()}
             ret._batch_num_nodes = new_bnn
         if self._batch_num_edges is not None:
-            new_bne = {k : F.copy_to(num, device, **kwargs)
+            new_bne = {k: F.copy_to(num, device, **kwargs)
                        for k, num in self._batch_num_edges.items()}
             ret._batch_num_edges = new_bne
 
@@ -5961,7 +5962,6 @@ class DGLGraph(object):
         gidx = self._graph.shared_memory(name, self.ntypes, self.etypes, formats)
         return DGLGraph(gidx, self.ntypes, self.etypes)
 
-
     def long(self):
         """Cast the graph to one with idtype int64
 
@@ -6173,6 +6173,7 @@ class DGLGraph(object):
 # Internal APIs
 ############################################################
 
+
 def make_canonical_etypes(etypes, ntypes, metagraph):
     """Internal function to convert etype name to (srctype, etype, dsttype)
 
@@ -6204,6 +6205,7 @@ def make_canonical_etypes(etypes, ntypes, metagraph):
     rst = [(ntypes[sid], etypes[eid], ntypes[did]) for sid, did, eid in zip(src, dst, eid)]
     return rst
 
+
 def find_src_dst_ntypes(ntypes, metagraph):
     """Internal function to split ntypes into SRC and DST categories.
 
@@ -6232,9 +6234,10 @@ def find_src_dst_ntypes(ntypes, metagraph):
         return None
     else:
         src, dst = ret
-        srctypes = {ntypes[tid] : tid for tid in src}
-        dsttypes = {ntypes[tid] : tid for tid in dst}
+        srctypes = {ntypes[tid]: tid for tid in src}
+        dsttypes = {ntypes[tid]: tid for tid in dst}
         return srctypes, dsttypes
+
 
 def pad_tuple(tup, length, pad_val=None):
     """Pad the given tuple to the given length.
@@ -6250,6 +6253,7 @@ def pad_tuple(tup, length, pad_val=None):
         return tup
     else:
         return tup + (pad_val,) * (length - len(tup))
+
 
 def reduce_dict_data(frames, reducer, order=None):
     """Merge tensor dictionaries into one. Resolve conflict fields using reducer.
@@ -6287,6 +6291,7 @@ def reduce_dict_data(frames, reducer, order=None):
             assert len(order) == len(frames)
             sorted_with_key = sorted(zip(frames, order), key=lambda x: x[1])
             frames = list(zip(*sorted_with_key))[0]
+
         def merger(flist):
             return F.stack(flist, 1)
     else:
@@ -6294,6 +6299,7 @@ def reduce_dict_data(frames, reducer, order=None):
         if redfn is None:
             raise DGLError('Invalid cross type reducer. Must be one of '
                            '"sum", "max", "min", "mean" or "stack".')
+
         def merger(flist):
             return redfn(F.stack(flist, 0), 0) if len(flist) > 1 else flist[0]
     keys = set()
@@ -6307,6 +6313,7 @@ def reduce_dict_data(frames, reducer, order=None):
                 flist.append(frm[k])
         ret[k] = merger(flist)
     return ret
+
 
 def combine_frames(frames, ids, col_names=None):
     """Merge the frames into one frame, taking the common columns.
@@ -6350,9 +6357,10 @@ def combine_frames(frames, ids, col_names=None):
         return None
 
     # concatenate the columns
-    to_cat = lambda key: [frames[i][key] for i in ids if frames[i].num_rows > 0]
+    def to_cat(key): return [frames[i][key] for i in ids if frames[i].num_rows > 0]
     cols = {key: F.cat(to_cat(key), dim=0) for key in schemes}
     return Frame(cols)
+
 
 def combine_names(names, ids=None):
     """Combine the selected names into one new name.
@@ -6374,6 +6382,7 @@ def combine_names(names, ids=None):
         selected = sorted([names[i] for i in ids])
         return '+'.join(selected)
 
+
 class DGLBlock(DGLGraph):
     """Subclass that signifies the graph is a block created from
     :func:`dgl.to_block`.
@@ -6394,11 +6403,11 @@ class DGLBlock(DGLGraph):
                    '      num_dst_nodes={dstnode},\n'
                    '      num_edges={edge},\n'
                    '      metagraph={meta})')
-            nsrcnode_dict = {ntype : self.number_of_src_nodes(ntype)
+            nsrcnode_dict = {ntype: self.number_of_src_nodes(ntype)
                              for ntype in self.srctypes}
-            ndstnode_dict = {ntype : self.number_of_dst_nodes(ntype)
+            ndstnode_dict = {ntype: self.number_of_dst_nodes(ntype)
                              for ntype in self.dsttypes}
-            nedge_dict = {etype : self.number_of_edges(etype)
+            nedge_dict = {etype: self.number_of_edges(etype)
                           for etype in self.canonical_etypes}
             meta = str(self.metagraph().edges(keys=True))
             return ret.format(
@@ -6466,7 +6475,8 @@ def _create_compute_graph(graph, u, v, eid, recv_nodes=None):
     eframe[EID] = eid
 
     return DGLGraph(hgidx, ([srctype], [dsttype]), [etype],
-                          node_frames=[srcframe, dstframe],
-                          edge_frames=[eframe]), unique_src, unique_dst, eid
+                    node_frames=[srcframe, dstframe],
+                    edge_frames=[eframe]), unique_src, unique_dst, eid
+
 
 _init_api("dgl.heterograph")

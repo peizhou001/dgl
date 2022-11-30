@@ -85,7 +85,7 @@ def find_lib_path(name=None, search_path=None, optional=False):
     lib_dll_path = []
     for n in name:
         lib_dll_path += [os.path.join(p, n) for p in dll_path]
-
+    print('lib path', lib_dll_path)
     lib_found = [p for p in lib_dll_path if os.path.isfile(p)]
 
     if not lib_found:

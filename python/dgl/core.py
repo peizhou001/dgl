@@ -301,7 +301,7 @@ def invoke_gsddmm(graph, func):
 
 
 def invoke_gspmm(
-    graph, mfunc, rfunc, *, srcdata=None, dstdata=None, edata=None
+        graph, mfunc, rfunc, *, srcdata=None, dstdata=None, edata=None, efeats_redirected=None,
 ):
     """Invoke g-SPMM computation on the graph.
 
@@ -348,7 +348,7 @@ def invoke_gspmm(
             lhs_target, _, rhs_target = mfunc.name.split("_", 2)
             x = data_dict_to_list(graph, x, mfunc, lhs_target)
             y = data_dict_to_list(graph, y, mfunc, rhs_target)
-        z = op(graph, x, y)
+        z = op(graph, x, y, efeats_redirected=efeats_redirected)
     else:
         x = alldata[mfunc.target][mfunc.in_field]
         op = getattr(ops, "{}_{}".format(mfunc.name, rfunc.name))
@@ -357,11 +357,11 @@ def invoke_gspmm(
                 x = data_dict_to_list(graph, x, mfunc, "u")
             else:  # "copy_e"
                 x = data_dict_to_list(graph, x, mfunc, "e")
-        z = op(graph, x)
+        z = op(graph, x, efeats_redirected)
     return {rfunc.out_field: z}
 
 
-def message_passing(g, mfunc, rfunc, afunc):
+def message_passing(g, mfunc, rfunc, afunc, efeats_redirected=None):
     """Invoke message passing computation on the whole graph.
 
     Parameters
@@ -387,7 +387,7 @@ def message_passing(g, mfunc, rfunc, afunc):
         is not None
     ):
         # invoke fused message passing
-        ndata = invoke_gspmm(g, mfunc, rfunc)
+        ndata = invoke_gspmm(g, mfunc, rfunc, efeats_redirected=efeats_redirected)
     else:
         # invoke message passing in two separate steps
         # message phase

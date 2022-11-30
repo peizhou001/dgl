@@ -38,6 +38,7 @@ __all__ = [
     "segment_mm",
 ]
 
+
 def _reduce_grad(grad, shape):
     """Reduce gradient on the broadcast dimension
     If there is broadcast in forward pass, gradients need to be reduced on
@@ -125,17 +126,23 @@ def spmm_cache_argY(binary_op, reduce_op, req_grad_X, req_grad_Y):
             return True
     return False
 
+
 class empty_context():
     """Empty context that does nothing"""
+
     def __init__(self, *args, **kargs):
         return
+
     def __enter__(self, *args, **kargs):
         return self
+
     def __exit__(self, *args, **kargs):
         return
 
+
 # This is to avoid warnings in cpu-only dgl. We don't enable autocast for CPU ops
 autocast = th.cuda.amp.autocast if th.cuda.is_available() else empty_context
+
 
 def _cast_if_autocast_enabled(*args):
     if not th.is_autocast_enabled() or not th.cuda.is_available():
@@ -143,10 +150,11 @@ def _cast_if_autocast_enabled(*args):
     else:
         return th.cuda.amp.autocast_mode._cast(args, th.get_autocast_gpu_dtype())
 
+
 class GSpMM(th.autograd.Function):
     @staticmethod
-    def forward(ctx, gidx, op, reduce_op, X, Y):
-        out, (argX, argY) = _gspmm(gidx, op, reduce_op, X, Y)
+    def forward(ctx, gidx, op, reduce_op, X, Y, efeats_redirected_indices):
+        out, (argX, argY) = _gspmm(gidx, op, reduce_op, X, Y, efeats_redirected_indices)
         reduce_last = _need_reduce_last_dim(X, Y)
         X_shape = X.shape if X is not None else None
         Y_shape = Y.shape if Y is not None else None
@@ -168,11 +176,12 @@ class GSpMM(th.autograd.Function):
             X = None
         if not spmm_cache_Y(op, reduce_op, req_grad_X, req_grad_Y):
             Y = None
+            efeats_redirected_indices = None
         if not spmm_cache_argX(op, reduce_op, req_grad_X, req_grad_Y):
             argX = None
         if not spmm_cache_argY(op, reduce_op, req_grad_X, req_grad_Y):
             argY = None
-        ctx.save_for_backward(X, Y, argX, argY)
+        ctx.save_for_backward(X, Y, efeats_redirected_indices, argX, argY)
         return out
 
     @staticmethod
@@ -187,14 +196,14 @@ class GSpMM(th.autograd.Function):
             device,
             reduce_last,
         ) = ctx.backward_cache
-        X, Y, argX, argY = ctx.saved_tensors
+        X, Y, efeats_redirected_indices, argX, argY = ctx.saved_tensors
         if op != "copy_rhs" and ctx.needs_input_grad[3]:
             g_rev = gidx.reverse()
             if reduce_op == "sum":
                 if op == "mul":
-                    dX = gspmm(g_rev, "mul", "sum", dZ, Y)
+                    dX = gspmm(g_rev, "mul", "sum", dZ, Y, efeats_redirected_indices)
                 elif op == "add":
-                    dX = gspmm(g_rev, "copy_lhs", "sum", dZ, Y)
+                    dX = gspmm(g_rev, "copy_lhs", "sum", dZ, Y, efeats_redirected_indices)
                 elif op == "copy_lhs":
                     dX = gspmm(g_rev, "copy_lhs", "sum", dZ, None)
             else:  # max/min
@@ -304,9 +313,9 @@ class GSpMM_hetero(th.autograd.Function):
         ) = ctx.backward_cache
         num_ntypes = gidx.number_of_ntypes()
         feats = ctx.saved_tensors[: -(4 * num_ntypes)]
-        argX = ctx.saved_tensors[-(4 * num_ntypes) : -(3 * num_ntypes)]
-        argX_ntype = ctx.saved_tensors[-(3 * num_ntypes) : -(2 * num_ntypes)]
-        argY = ctx.saved_tensors[-(2 * num_ntypes) : -num_ntypes]
+        argX = ctx.saved_tensors[-(4 * num_ntypes): -(3 * num_ntypes)]
+        argX_ntype = ctx.saved_tensors[-(3 * num_ntypes): -(2 * num_ntypes)]
+        argY = ctx.saved_tensors[-(2 * num_ntypes): -num_ntypes]
         argY_etype = ctx.saved_tensors[-num_ntypes:]
         X, Y = feats[:X_len], feats[X_len:]
 
@@ -1004,14 +1013,15 @@ class GATHERMM(th.autograd.Function):
         return A_grad, B_grad, None, None
 
 
-def gspmm(gidx, op, reduce_op, lhs_data, rhs_data):
+def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=None):
     if op == "sub":
         op = "add"
         rhs_data = -rhs_data
     if op == "div":
         op = "mul"
         rhs_data = 1.0 / rhs_data
-    args = _cast_if_autocast_enabled(gidx, op, reduce_op, lhs_data, rhs_data)
+    args = _cast_if_autocast_enabled(gidx, op, reduce_op, lhs_data,
+                                     rhs_data, efeats_redirected_indices)
     with autocast(enabled=False):
         return GSpMM.apply(*args)
 
@@ -1153,7 +1163,7 @@ def segment_mm(A, B, seglen_A):
         C = []
         off = 0
         for i in range(B.shape[0]):
-            C.append(A[off : off + seglen_A[i]] @ B[i])
+            C.append(A[off: off + seglen_A[i]] @ B[i])
             off += seglen_A[i]
         return th.cat(C)
     else:

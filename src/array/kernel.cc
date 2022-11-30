@@ -24,7 +24,7 @@ namespace {}  // namespace
 /** @brief Generalized Sparse Matrix-Matrix Multiplication. */
 void SpMM(
     const std::string& op, const std::string& reduce, HeteroGraphPtr graph,
-    NDArray ufeat, NDArray efeat, NDArray out, std::vector<NDArray> out_aux) {
+    NDArray ufeat, NDArray efeat, NDArray out,NDArray E_Redir, std::vector<NDArray> out_aux) {
   // TODO(zihao): format tuning
   SparseFormat format = graph->SelectFormat(0, CSC_CODE);
   const auto& bcast = CalcBcastOff(op, ufeat, efeat);
@@ -34,8 +34,8 @@ void SpMM(
       ATEN_FLOAT_TYPE_SWITCH_16BITS(out->dtype, Dtype, XPU, "Feature data", {
         if (format == SparseFormat::kCSC) {
           SpMMCsr<XPU, IdType, Dtype>(
-              op, reduce, bcast, graph->GetCSCMatrix(0), ufeat, efeat, out,
-              out_aux);
+                                      op, reduce, bcast, graph->GetCSCMatrix(0), ufeat, efeat, out,E_Redir,
+                                      out_aux);
         } else if (format == SparseFormat::kCOO) {
           SpMMCoo<XPU, IdType, Dtype>(
               op, reduce, bcast, graph->GetCOOMatrix(0), ufeat, efeat, out,
@@ -252,6 +252,34 @@ void SDDMM(
   });
 }
 
+/** @brief Generalized Sampled Dense-Dense Matrix Multiplication with edge redirected indices. */
+void SDDMMRedirected(
+    const std::string& op, HeteroGraphPtr graph, NDArray lhs, NDArray rhs,
+    NDArray out, NDArray efeats_redirected,int lhs_target, int rhs_target) {
+  // TODO(zihao): format tuning
+  SparseFormat format = graph->SelectFormat(0, COO_CODE);
+  const auto& bcast = CalcBcastOff(op, lhs, rhs);
+
+  ATEN_XPU_SWITCH_CUDA(graph->Context().device_type, XPU, "SDDMM", {
+    ATEN_ID_TYPE_SWITCH(graph->DataType(), IdType, {
+      ATEN_FLOAT_TYPE_SWITCH_16BITS(out->dtype, Dtype, XPU, "Feature data", {
+        if (format == SparseFormat::kCSR) {
+          SDDMMCsrRedirected<XPU, IdType, Dtype>(
+                                                 op, bcast, graph->GetCSRMatrix(0), lhs, rhs, out, efeats_redirected,lhs_target,
+              rhs_target);
+        } else if (format == SparseFormat::kCOO) {
+          SDDMMCoo<XPU, IdType, Dtype>(
+              op, bcast, graph->GetCOOMatrix(0), lhs, rhs, out, lhs_target,
+              rhs_target);
+        } else {
+          LOG(FATAL) << "SDDMM only supports CSR and COO formats";
+        }
+      });
+    });
+  });
+}
+
+  
 /**
  * @brief Find the src/dst/etype id based on the target 'u', 'v' or 'e'.
  *
@@ -483,24 +511,34 @@ DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSpMM")
       NDArray U = args[3];
       NDArray E = args[4];
       NDArray V = args[5];
-      NDArray ArgU = args[6];
-      NDArray ArgE = args[7];
+      NDArray E_Redir = args[6];      
+      NDArray ArgU = args[7];
+      NDArray ArgE = args[8];
       CheckCtx(
-          graph->Context(), {U, E, V, ArgU, ArgE},
-          {"U_data", "E_data", "out", "Arg_U", "Arg_E"});
+               graph->Context(), {U, E, V, E_Redir,ArgU, ArgE},
+               {"U_data", "E_data", "out", "E_Redir","Arg_U", "Arg_E"});
       CheckContiguous(
-          {U, E, V, ArgU, ArgE}, {"U_data", "E_data", "out", "Arg_U", "Arg_E"});
+                      {U, E, V, E_Redir,ArgU, ArgE}, {"U_data", "E_data", "out", "E_Redir","Arg_U", "Arg_E"});
       CHECK_EQ(graph->NumEdgeTypes(), 1);
       auto pair =
           graph->meta_graph()->FindEdge(0);  // only one etype in the graph.
       const dgl_type_t src_vtype = pair.first;
       const dgl_type_t dst_vtype = pair.second;
-      CheckShape(
-          {graph->NumVertices(src_vtype), graph->NumEdges(0),
-           graph->NumVertices(dst_vtype)},
-          {0, 1, 2, 2, 2}, {U, E, V, ArgU, ArgE},
-          {"U_data", "E_data", "out", "Arg_U", "Arg_E"});
-      SpMM(op, reduce_op, graph.sptr(), U, E, V, {ArgU, ArgE});
+
+      if(aten::IsNullArray(E_Redir))
+          CheckShape(
+                     {graph->NumVertices(src_vtype), graph->NumEdges(0),
+                      graph->NumVertices(dst_vtype)},
+                     {0, 1, 2, 2, 2}, {U, E, V, ArgU, ArgE},
+                     {"U_data", "E_data", "out", "Arg_U", "Arg_E"});
+      else
+          CheckShape(
+                     {graph->NumVertices(src_vtype), graph->NumEdges(0),
+                      graph->NumVertices(dst_vtype)},
+                     {0, 1, 2, 2, 2}, {U, E_Redir, V, ArgU, ArgE},
+                     {"U_data", "E_redirection_data", "out", "Arg_U", "Arg_E"});
+        
+      SpMM(op, reduce_op, graph.sptr(), U, E, V, E_Redir,{ArgU, ArgE});
     });
 
 DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelGATHERMM")
@@ -630,6 +668,34 @@ DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSDDMM")
       SDDMM(op, graph.sptr(), lhs, rhs, out, lhs_target, rhs_target);
     });
 
+
+DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSDDMMRedirected")
+    .set_body([](DGLArgs args, DGLRetValue* rv) {
+      HeteroGraphRef graph = args[0];
+      const std::string op = args[1];
+      NDArray lhs = args[2];
+      NDArray rhs = args[3];
+      NDArray out = args[4];
+      NDArray efeats_redirected = args[5];      
+      int lhs_target = args[6];
+      int rhs_target = args[7];
+      CheckCtx(graph->Context(), {lhs, rhs, out,efeats_redirected}, {"lhs", "rhs", "out","efeats_redirected"});
+      CheckContiguous({lhs, rhs, out,efeats_redirected}, {"lhs", "rhs", "out","efeats_redirected"});
+      CHECK_EQ(graph->NumEdgeTypes(), 1);
+      auto pair =
+          graph->meta_graph()->FindEdge(0);  // only one etype in the graph.
+      const dgl_type_t src_vtype = pair.first;
+      const dgl_type_t dst_vtype = pair.second;
+
+      CheckShape(
+          {graph->NumVertices(src_vtype), graph->NumEdges(0),
+           graph->NumVertices(dst_vtype)},
+          {lhs_target, rhs_target, 1}, {lhs, rhs, out},
+          {"U_data", "E_data", "V_data"});
+      SDDMMRedirected(op, graph.sptr(), lhs, rhs, out, efeats_redirected,lhs_target, rhs_target);
+    });
+
+  
 DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSDDMMHetero")
     .set_body([](DGLArgs args, DGLRetValue* rv) {
       HeteroGraphRef graph = args[0];

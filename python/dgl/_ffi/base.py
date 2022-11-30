@@ -20,11 +20,11 @@ if sys.version_info[0] == 3:
     numeric_types = (float, int, np.float32, np.int32)
     # this function is needed for python3
     # to convert ctypes.char_p .value back to python str
-    py_str = lambda x: x.decode("utf-8")
+    def py_str(x): return x.decode("utf-8")
 else:
     string_types = (basestring,)
     numeric_types = (float, int, long, np.float32, np.int32)
-    py_str = lambda x: x
+    def py_str(x): return x
 
 
 class DGLError(Exception):
@@ -48,6 +48,7 @@ def _load_lib():
 __version__ = libinfo.__version__
 # library instance of nnvm
 _LIB, _LIB_NAME, _DIR_NAME = _load_lib()
+print(_LIB, _LIB_NAME, _DIR_NAME)
 
 # The FFI mode of DGL
 _FFI_MODE = os.environ.get("DGL_FFI", "auto")
@@ -55,6 +56,8 @@ _FFI_MODE = os.environ.get("DGL_FFI", "auto")
 # ----------------------------
 # helper function in ctypes.
 # ----------------------------
+
+
 def check_call(ret):
     """Check the return value of C API call
 

@@ -83,8 +83,9 @@ void SpMMSumCsrXbyak(
 template <typename IdType, typename DType, typename Op>
 void SpMMSumCsrNaive(
     const BcastOff& bcast, const CSRMatrix& csr, const DType* X, const DType* W,
-    DType* O) {
+    DType* O,const IdType* E_indices) {
   const bool has_idx = !IsNullArray(csr.data);
+  const bool has_edge_redirection = (E_indices != nullptr);
   const IdType* indptr = csr.indptr.Ptr<IdType>();
   const IdType* indices = csr.indices.Ptr<IdType>();
   const IdType* edges = csr.data.Ptr<IdType>();
@@ -95,7 +96,9 @@ void SpMMSumCsrNaive(
       DType* out_off = O + rid * dim;
       for (IdType j = row_start; j < row_end; ++j) {
         const IdType cid = indices[j];
-        const IdType eid = has_idx ? edges[j] : j;
+        const IdType eid_ = has_idx ? edges[j] : j;
+        const IdType eid = has_edge_redirection ? E_indices[eid_] : eid_;
+        
         for (int64_t k = 0; k < dim; ++k) {
           const int64_t lhs_add = bcast.use_bcast ? bcast.lhs_offset[k] : k;
           const int64_t rhs_add = bcast.use_bcast ? bcast.rhs_offset[k] : k;
@@ -123,13 +126,15 @@ void SpMMSumCsrNaive(
 template <typename IdType, typename DType, typename Op>
 void SpMMSumCsr(
     const BcastOff& bcast, const CSRMatrix& csr, NDArray ufeat, NDArray efeat,
-    NDArray out) {
+    NDArray out,NDArray E_Redir) {
+  printf("hello");
   const bool has_idx = !IsNullArray(csr.data);
   const IdType* indptr = csr.indptr.Ptr<IdType>();
   const IdType* indices = csr.indices.Ptr<IdType>();
   const IdType* edges = csr.data.Ptr<IdType>();
   const DType* X = ufeat.Ptr<DType>();
   const DType* W = efeat.Ptr<DType>();
+  const IdType* E_Indices = IsNullArray(E_Redir) ? nullptr :  E_Redir.Ptr<IdType>();
   int64_t dim = bcast.out_len;
   DType* O = out.Ptr<DType>();
   CHECK_NOTNULL(indptr);
@@ -149,7 +154,7 @@ void SpMMSumCsr(
                           std::is_same<DType, double>::value ||
                           !dgl::runtime::Config::Global()->IsLibxsmmAvailable();
   if (!no_libxsmm) {
-    SpMMSumCsrLibxsmm<IdType, DType, Op>(bcast, csr, ufeat, efeat, out);
+    SpMMSumCsrLibxsmm<IdType, DType, Op>(bcast, csr, ufeat, efeat, out,E_Indices);
   } else {
 #endif  // USE_LIBXSMM
     typedef dgl::ElemWiseAddUpdate<Op> ElemWiseUpd;
@@ -161,11 +166,11 @@ void SpMMSumCsr(
                                 ? asm_kernel_ptr.get()
                                 : nullptr;
     if (cpu_spec && dim > 16 && !bcast.use_bcast) {
-      SpMMSumCsrXbyak<IdType, DType, Op>(cpu_spec, bcast, csr, X, W, O);
+      SpMMSumCsrXbyak<IdType, DType, Op>(cpu_spec, bcast, csr, X, W, O,E_Indices);
     } else {
 #endif  // USE_AVX
 #endif  // _WIN32
-      SpMMSumCsrNaive<IdType, DType, Op>(bcast, csr, X, W, O);
+      SpMMSumCsrNaive<IdType, DType, Op>(bcast, csr, X, W, O,E_Indices);
 #if !defined(_WIN32)
 #ifdef USE_AVX
     }
@@ -247,7 +252,7 @@ void SpMMSumCoo(
 template <typename IdType, typename DType, typename Op, typename Cmp>
 void SpMMCmpCsr(
     const BcastOff& bcast, const CSRMatrix& csr, NDArray ufeat, NDArray efeat,
-    NDArray out, NDArray argu, NDArray arge) {
+    NDArray out,NDArray E_Redir, NDArray argu, NDArray arge) {
   const bool has_idx = !IsNullArray(csr.data);
   const IdType* indptr = static_cast<IdType*>(csr.indptr->data);
   const IdType* indices = static_cast<IdType*>(csr.indices->data);
