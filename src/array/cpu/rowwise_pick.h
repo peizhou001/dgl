@@ -94,6 +94,162 @@ using EtypeRangePickFn = std::function<void(
     const std::vector<IdxType>& et_idx, const std::vector<IdxType>& et_eid,
     const IdxType* eid, IdxType* out_idx)>;
 
+
+
+
+// Template for picking non-zero values row-wise. The implementation utilizes
+// OpenMP parallelization on rows because each row performs computation
+// independently.
+template <typename IdxType>
+CSRMatrix CSRRowWisePickFused(
+    CSRMatrix mat, IdArray rows, int64_t num_picks, bool replace,
+    PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
+  using namespace aten;
+  const IdxType* indptr = static_cast<IdxType*>(mat.indptr->data);
+  const IdxType* indices = static_cast<IdxType*>(mat.indices->data);
+  const IdxType* data =
+      CSRHasData(mat) ? static_cast<IdxType*>(mat.data->data) : nullptr;
+  const IdxType* rows_data = static_cast<IdxType*>(rows->data);
+  const int64_t num_rows = rows->shape[0];
+  const auto& ctx = mat.indptr->ctx;
+  const auto& idtype = mat.indptr->dtype;
+
+
+  IdArray mapping = Full(-1,mat.num_rows,sizeof(IdxType) * 8, ctx);
+  IdxType* mapping_data = mapping.Ptr<IdxType>();
+  
+  
+  // To leverage OMP parallelization, we create two arrays to store
+  // picked src and dst indices. Each array is of length num_rows * num_picks.
+  // For rows whose nnz < num_picks, the indices are padded with -1.
+  //
+  // We check whether all the given rows
+  // have at least num_picks number of nnz when replace is false.
+  //
+  // If the check holds, remove -1 elements by remove_if operation, which simply
+  // moves valid elements to the head of arrays and create a view of the
+  // original array. The implementation consumes a little extra memory than the
+  // actual requirement.
+  //
+  // Otherwise, directly use the row and col arrays to construct the result COO
+  // matrix.
+  //
+  // [02/29/2020 update]: OMP is disabled for now since batch-wise parallelism
+  // is more
+  //   significant. (minjie)
+
+  // Do not use omp_get_max_threads() since that doesn't work for compiling
+  // without OpenMP.
+  const int num_threads = runtime::compute_num_threads(0, num_rows, 1);
+  std::vector<int64_t> global_prefix(num_threads + 1, 0);
+
+  // TODO(BarclayII) Using OMP parallel directly instead of using
+  // runtime::parallel_for does not handle exceptions well (directly aborts when
+  // an exception pops up). It runs faster though because there is less
+  // scheduling.  Need to handle exceptions better.
+  IdArray picked_row, picked_col, picked_idx;
+
+  IdArray block_csr_indptr = IdArray::Empty({num_rows + 1}, idtype, ctx);      
+  IdxType *block_csr_indptr_data = block_csr_indptr.Ptr<IdxType>();
+  
+#pragma omp parallel num_threads(num_threads)
+  {
+    const int thread_id = omp_get_thread_num();
+
+    const int64_t start_i =
+        thread_id * (num_rows / num_threads) +
+        std::min(static_cast<int64_t>(thread_id), num_rows % num_threads);
+    const int64_t end_i =
+        (thread_id + 1) * (num_rows / num_threads) +
+        std::min(static_cast<int64_t>(thread_id + 1), num_rows % num_threads);
+    assert(thread_id + 1 < num_threads || end_i == num_rows);
+
+    const int64_t num_local = end_i - start_i;
+
+    // make sure we don't have to pay initialization cost
+    std::unique_ptr<int64_t[]> local_prefix(new int64_t[num_local + 1]);
+    local_prefix[0] = 0;
+    for (int64_t i = start_i; i < end_i; ++i) {
+      // build prefix-sum
+      const int64_t local_i = i - start_i;
+      const IdxType rid = rows_data[i];
+      IdxType len = num_picks_fn(
+          rid, indptr[rid], indptr[rid + 1] - indptr[rid], indices, data);
+      local_prefix[local_i + 1] = local_prefix[local_i] + len;
+    }
+    global_prefix[thread_id + 1] = local_prefix[num_local];
+
+#pragma omp barrier
+#pragma omp master
+    {
+      for (int t = 0; t < num_threads; ++t) {
+        global_prefix[t + 1] += global_prefix[t];
+      }
+      picked_row = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
+      picked_col = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
+      picked_idx = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
+    }
+
+#pragma omp barrier
+    IdxType* picked_rdata = picked_row.Ptr<IdxType>();
+    IdxType* picked_cdata = picked_col.Ptr<IdxType>();
+    IdxType* picked_idata = picked_idx.Ptr<IdxType>();
+
+	
+    const IdxType thread_offset = global_prefix[thread_id];
+
+    for (int64_t i = start_i; i < end_i; ++i) {
+      const IdxType rid = rows_data[i];
+      const int64_t local_i = i - start_i;
+      block_csr_indptr_data[i] = local_prefix[local_i] + thread_offset;
+      mapping_data[rid] = i;
+      
+      
+      const IdxType off = indptr[rid];
+      const IdxType len = indptr[rid + 1] - off;
+      if (len == 0) continue;
+
+
+      const int64_t row_offset = local_prefix[local_i] + thread_offset;
+      const int64_t num_picks = local_prefix[local_i + 1] + thread_offset - row_offset;
+
+      pick_fn(
+          rid, off, len, num_picks, indices, data, picked_idata + row_offset);
+      for (int64_t j = 0; j < num_picks; ++j) {
+        const IdxType picked = picked_idata[row_offset + j];
+        picked_rdata[row_offset + j] = i;
+        picked_cdata[row_offset + j] = indices[picked];
+        picked_idata[row_offset + j] = data ? data[picked] : picked;
+      }
+    }
+  }
+  block_csr_indptr_data[num_rows] = global_prefix.back();
+  int64_t last_compact_index = num_rows;
+  IdxType* cdata = picked_col.Ptr<IdxType>();  
+  for(int64_t i = 0; i < picked_col->shape[0];++i)
+    {
+      IdxType current_mapping = mapping_data[cdata[i]];
+      if(current_mapping == -1)
+	{
+	  cdata[i] = last_compact_index;
+	  mapping_data[cdata[i]] = last_compact_index;
+	  ++last_compact_index;
+	}
+      else
+	cdata[i] = current_mapping;
+    }
+  
+  return CSRMatrix(
+      num_rows, last_compact_index,
+      block_csr_indptr,picked_col,picked_idx);
+}
+
+
+
+
+
+
+
 // Template for picking non-zero values row-wise. The implementation utilizes
 // OpenMP parallelization on rows because each row performs computation
 // independently.

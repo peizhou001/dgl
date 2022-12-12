@@ -26,6 +26,18 @@ void SpMMCsr(
     const aten::CSRMatrix& csr, NDArray ufeat, NDArray efeat, NDArray out,NDArray E_Redir,
     std::vector<NDArray> out_aux);
 
+
+/**
+ * @brief Generalized Partial Sparse Matrix Dense Matrix Multiplication on Csr format.
+ */
+template <int XPU, typename IdType, typename DType>
+void SpMMCsrPartial(
+    const std::string& op, const std::string& reduce, const BcastOff& bcast,
+    const aten::CSRMatrix& csr, NDArray ufeat, NDArray efeat,NDArray src_nodes,NDArray edges,
+    NDArray tgt_nodes, NDArray out,std::vector<NDArray> out_aux);
+  
+
+  
 /**
  * @brief Generalized Sparse Matrix Dense Matrix Multiplication on Csr format
  * with heterograph support.

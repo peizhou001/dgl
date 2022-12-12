@@ -582,6 +582,34 @@ COOMatrix CSRRowWiseSampling(
   return ret;
 }
 
+
+CSRMatrix CSRRowWiseSamplingFused(
+    CSRMatrix mat, IdArray rows, int64_t num_samples, NDArray prob_or_mask,
+    bool replace) {
+  CSRMatrix ret;
+  if (IsNullArray(prob_or_mask)) {
+    ATEN_CSR_SWITCH_CUDA_UVA(
+        mat, rows, XPU, IdType, "CSRRowWiseSamplingUniformFused", {
+          ret = impl::CSRRowWiseSamplingUniformFused<XPU, IdType>(
+              mat, rows, num_samples, replace);
+        });
+  } else {
+    // prob_or_mask is pinned and rows on GPU is valid
+    CHECK_VALID_CONTEXT(prob_or_mask, rows);
+    ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSamplingFused", {
+      CHECK(!(prob_or_mask->dtype.bits == 8 && XPU == kDGLCUDA))
+          << "GPU sampling with masks is currently not supported yet.";
+      ATEN_FLOAT_INT8_UINT8_TYPE_SWITCH(
+          prob_or_mask->dtype, FloatType, "probability or mask", {
+            ret = impl::CSRRowWiseSamplingFused<XPU, IdType, FloatType>(
+                mat, rows, num_samples, prob_or_mask, replace);
+          });
+    });
+  }
+  return ret;
+}
+
+  
 COOMatrix CSRRowWisePerEtypeSampling(
     CSRMatrix mat, IdArray rows, const std::vector<int64_t>& eid2etype_offset,
     const std::vector<int64_t>& num_samples,

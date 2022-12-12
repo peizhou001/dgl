@@ -507,6 +507,11 @@ COOMatrix CSRRowWiseSampling(
     CSRMatrix mat, IdArray rows, int64_t num_samples,
     NDArray prob_or_mask = NDArray(), bool replace = true);
 
+
+CSRMatrix CSRRowWiseSamplingFused(
+    CSRMatrix mat, IdArray rows, int64_t num_samples,
+    NDArray prob_or_mask = NDArray(), bool replace = true);
+  
 /**
  * @brief Randomly select a fixed number of non-zero entries for each edge type
  *        along each given row independently.

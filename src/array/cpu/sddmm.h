@@ -91,7 +91,7 @@ void SDDMMCsrRedirected(
   const IdType* edges = csr.data.Ptr<IdType>();
   const DType* X = lhs.Ptr<DType>();
   const DType* Y = rhs.Ptr<DType>();
-  const IdType * E_Indices = efeats_redirected.Ptr<DType>();
+  const IdType * E_Indices = efeats_redirected.Ptr<IdType>();
   const int64_t dim = bcast.out_len, lhs_dim = bcast.lhs_len,
                 rhs_dim = bcast.rhs_len, reduce_size = bcast.reduce_size;
   DType* O = out.Ptr<DType>();

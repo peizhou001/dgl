@@ -14,6 +14,14 @@
 namespace dgl {
 namespace sampling {
 
+
+HeteroSubgraph SampleNeighborsFused(
+    const HeteroGraphPtr hg, const std::vector<IdArray>& nodes,
+    const std::vector<int64_t>& fanouts, EdgeDir dir,
+    const std::vector<FloatArray>& probability,
+    const std::vector<IdArray>& exclude_edges, bool replace = true);
+  
+  
 /**
  * @brief Sample from the neighbors of the given nodes and return the sampled
  * edges as a graph.

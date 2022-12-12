@@ -113,6 +113,53 @@ void SpMMSumCsrNaive(
   });
 }
 
+// /**
+//  * @brief Naive CPU kernel of SpMM on Csr format.
+//  * @param cpu_spec JIT'ed kernel
+//  * @param bcast Broadcast information.
+//  * @param csr The Csr matrix.
+//  * @param X The feature on source nodes.
+//  * @param W The feature on edges.
+//  * @param O The result feature on destination nodes.
+//  * @note it uses node parallel strategy, different threads are responsible
+//  *       for the computation of different nodes.
+//  */
+// template <typename IdType, typename DType, typename Op>
+// void SpMMSumCsrPartialNaive(
+//     const BcastOff& bcast, const CSRMatrix& csr, const DType* X, const DType* W,
+//     NDArray src_nodes,NDArray indptr_partial_,NDArray tgt_nodes,
+//     DType* O) {
+//   const IdType* indptr = csr.indptr.Ptr<IdType>();
+//   const IdType* indices = csr.indices.Ptr<IdType>();
+//   num_tgt_nodes = tgt_nodes->shape[0];
+//   const IdType* tgt_nodes_ptr = tgt_nodes.Ptr<IdType>();
+//   const IdType* indptr_partial = indptr_partial.Ptr<IdType>();
+    
+//   int64_t dim = bcast.out_len, lhs_dim = bcast.lhs_len, rhs_dim = bcast.rhs_len;
+//   runtime::parallel_for(0, num_tgt_nodes, [&](size_t b, size_t e) {
+//     for (auto rid = b; rid < e; ++rid) {
+//       rid = tgt_nodes_ptr[rid_partial]      
+//       const IdType row_start = indptr_partial[rid], row_end = indptr_partial[rid + 1];
+//       DType* out_off = O + rid * dim;
+//       for (IdType j = row_start; j < row_end; ++j) {
+//         const IdType cid = indices[j];
+//         const IdType eid =  j;
+        
+//         for (int64_t k = 0; k < dim; ++k) {
+//           const int64_t lhs_add = bcast.use_bcast ? bcast.lhs_offset[k] : k;
+//           const int64_t rhs_add = bcast.use_bcast ? bcast.rhs_offset[k] : k;
+//           const DType* lhs_off =
+//               Op::use_lhs ? X + cid * lhs_dim + lhs_add : nullptr;
+//           const DType* rhs_off =
+//               Op::use_rhs ? W + eid * rhs_dim + rhs_add : nullptr;
+//           out_off[k] += Op::Call(lhs_off, rhs_off);
+//         }
+//       }
+//     }
+//   });
+// }
+
+  
 /**
  * @brief CPU kernel of SpMM on Csr format.
  * @param bcast Broadcast information.

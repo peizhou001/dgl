@@ -154,7 +154,8 @@ def _edge_softmax_forward(gidx, e, op):
     return myout
 
 
-def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None):
+def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None,
+           src_nodes=None, edges=None, tgt_nodes=None):
     r"""Generalized Sparse Matrix Multiplication interface. It takes the result of
     :attr:`op` on source node feature and edge feature, leads to a message on edge.
     Then aggregates the message by :attr:`reduce_op` on destination nodes.
@@ -203,7 +204,8 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None):
         if F.dtype(efeats_redirected_indices) != idtype:
             raise DGLError(
                 "When efeats_redirected is provided, the edata features should have type {} but type"
-                " {} is provided".format(idtype, F.dtype(efeats_redirected_indices))
+                " {} is provided".format(
+                    idtype, F.dtype(efeats_redirected_indices))
             )
 
         if efeats_redirected_indices.ndim != 1:
@@ -234,14 +236,25 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None):
             e = F.unsqueeze(e, -1)
             expand_e = True
         if efeats_redirected_indices is not None and F.ndim(efeats_redirected_indices) == 1:
-            efeats_redirected_indices = F.unsqueeze(efeats_redirected_indices, -1)
+            efeats_redirected_indices = F.unsqueeze(
+                efeats_redirected_indices, -1)
 
     ctx = F.context(u) if use_u else F.context(e)
     dtype = F.dtype(u) if use_u else F.dtype(e)
     u_shp = F.shape(u) if use_u else (0,)
     e_shp = F.shape(e) if use_e else (0,)
-    _, dsttype = gidx.metagraph.find_edge(0)
-    v_shp = (gidx.number_of_nodes(dsttype),) + infer_broadcast_shape(
+
+    partial_propagation = (src_nodes is not None
+                           and tgt_nodes is not None
+                           and edges is not None)
+
+    if partial_propagation:
+        n_tgt_nodes = len(tgt_nodes)
+    else:
+        _, dsttype = gidx.metagraph.find_edge(0)
+        n_tgt_nodes = gidx.number_of_nodes(dsttype)
+
+    v_shp = (n_tgt_nodes,) + infer_broadcast_shape(
         op, u_shp[1:], e_shp[1:]
     )
     v = F.zeros(v_shp, dtype, ctx)
@@ -254,18 +267,33 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None):
             arg_e = F.zeros(v_shp, idtype, ctx)
     arg_u_nd = to_dgl_nd_for_write(arg_u)
     arg_e_nd = to_dgl_nd_for_write(arg_e)
-    if gidx.number_of_edges(0) > 0:
-        _CAPI_DGLKernelSpMM(
+    if partial_propagation:
+        _CAPI_DGLKernelSpMMPartial(
             gidx,
             op,
             reduce_op,
             to_dgl_nd(u if use_u else None),
             to_dgl_nd(e if use_e else None),
+            to_dgl_nd(src_nodes),
+            to_dgl_nd(edges),
+            to_dgl_nd(tgt_nodes),
             to_dgl_nd_for_write(v),
-            to_dgl_nd(efeats_redirected_indices),
             arg_u_nd,
             arg_e_nd,
         )
+    else:
+        if gidx.number_of_edges(0) > 0:
+            _CAPI_DGLKernelSpMM(
+                gidx,
+                op,
+                reduce_op,
+                to_dgl_nd(u if use_u else None),
+                to_dgl_nd(e if use_e else None),
+                to_dgl_nd_for_write(v),
+                to_dgl_nd(efeats_redirected_indices),
+                arg_u_nd,
+                arg_e_nd,
+            )
     # NOTE(zihao): actually we can avoid the following step, because arg_*_nd
     # refers to the data that stores arg_*. After we call _CAPI_DGLKernelSpMM,
     # arg_* should have already been changed. But we found this doesn't work

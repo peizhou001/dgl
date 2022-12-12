@@ -153,8 +153,10 @@ def _cast_if_autocast_enabled(*args):
 
 class GSpMM(th.autograd.Function):
     @staticmethod
-    def forward(ctx, gidx, op, reduce_op, X, Y, efeats_redirected_indices):
-        out, (argX, argY) = _gspmm(gidx, op, reduce_op, X, Y, efeats_redirected_indices)
+    def forward(ctx, gidx, op, reduce_op, X, Y, efeats_redirected_indices,
+                src_nodes, edges, tgt_nodes):
+        out, (argX, argY) = _gspmm(gidx, op, reduce_op,
+                                   X, Y, efeats_redirected_indices, src_nodes, edges, tgt_nodes)
         reduce_last = _need_reduce_last_dim(X, Y)
         X_shape = X.shape if X is not None else None
         Y_shape = Y.shape if Y is not None else None
@@ -201,9 +203,11 @@ class GSpMM(th.autograd.Function):
             g_rev = gidx.reverse()
             if reduce_op == "sum":
                 if op == "mul":
-                    dX = gspmm(g_rev, "mul", "sum", dZ, Y, efeats_redirected_indices)
+                    dX = gspmm(g_rev, "mul", "sum", dZ, Y,
+                               efeats_redirected_indices)
                 elif op == "add":
-                    dX = gspmm(g_rev, "copy_lhs", "sum", dZ, Y, efeats_redirected_indices)
+                    dX = gspmm(g_rev, "copy_lhs", "sum", dZ,
+                               Y, efeats_redirected_indices)
                 elif op == "copy_lhs":
                     dX = gspmm(g_rev, "copy_lhs", "sum", dZ, None)
             else:  # max/min
@@ -238,7 +242,7 @@ class GSpMM(th.autograd.Function):
             dY = _reduce_grad(dY, Y_shape)
         else:  # Y has no gradient
             dY = None
-        return None, None, None, dX, dY
+        return None, None, None, dX, dY, None, None, None, None
 
 
 class GSpMM_hetero(th.autograd.Function):
@@ -1009,11 +1013,13 @@ class GATHERMM(th.autograd.Function):
         if ctx.needs_input_grad[1]:
             #  Compute B_grad = A^T * Out_grad
             B_grad = th.zeros(B.shape, device=B.device, dtype=B.dtype)
-            B_grad = _gather_mm_scatter(A, dZ, B_grad, idx_a=idx_a, idx_c=idx_b)
+            B_grad = _gather_mm_scatter(
+                A, dZ, B_grad, idx_a=idx_a, idx_c=idx_b)
         return A_grad, B_grad, None, None
 
 
-def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=None):
+def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=None,
+          src_nodes=None, edges=None, tgt_nodes=None):
     if op == "sub":
         op = "add"
         rhs_data = -rhs_data
@@ -1021,7 +1027,7 @@ def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=Non
         op = "mul"
         rhs_data = 1.0 / rhs_data
     args = _cast_if_autocast_enabled(gidx, op, reduce_op, lhs_data,
-                                     rhs_data, efeats_redirected_indices)
+                                     rhs_data, efeats_redirected_indices, src_nodes, edges, tgt_nodes)
     with autocast(enabled=False):
         return GSpMM.apply(*args)
 
@@ -1033,7 +1039,8 @@ def gsddmm(gidx, op, lhs_data, rhs_data, lhs_target="u", rhs_target="v"):
     if op == "div":
         op = "mul"
         rhs_data = 1.0 / rhs_data
-    args = _cast_if_autocast_enabled(gidx, op, lhs_data, rhs_data, lhs_target, rhs_target)
+    args = _cast_if_autocast_enabled(
+        gidx, op, lhs_data, rhs_data, lhs_target, rhs_target)
     with autocast(enabled=False):
         return GSDDMM.apply(*args)
 
@@ -1062,7 +1069,8 @@ def gspmm_hetero(g, op, reduce_op, lhs_len, *lhs_and_rhs_tuple):
     if op in ["add", "mul"]:
         lhs_and_rhs_tuple = tuple(list(lhs_tuple) + list(rhs_tuple))
 
-    args = _cast_if_autocast_enabled(g, op, reduce_op, lhs_len, *lhs_and_rhs_tuple)
+    args = _cast_if_autocast_enabled(
+        g, op, reduce_op, lhs_len, *lhs_and_rhs_tuple)
     with autocast(enabled=False):
         return GSpMM_hetero.apply(*args)
 
@@ -1093,7 +1101,8 @@ def gsddmm_hetero(
     if op in ["add", "mul"]:
         lhs_and_rhs_tuple = tuple(list(lhs_tuple) + list(rhs_tuple))
 
-    args = _cast_if_autocast_enabled(g, op, lhs_len, lhs_target, rhs_target, *lhs_and_rhs_tuple)
+    args = _cast_if_autocast_enabled(
+        g, op, lhs_len, lhs_target, rhs_target, *lhs_and_rhs_tuple)
     with autocast(enabled=False):
         return GSDDMM_hetero.apply(*args)
 

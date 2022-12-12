@@ -48,6 +48,40 @@ void SpMM(
   });
 }
 
+
+// /** @brief Generalized Sparse Matrix-Matrix Multiplication. */
+// void SpMMPartial(
+//     const std::string& op, const std::string& reduce, HeteroGraphPtr graph,
+//     NDArray ufeat, NDArray efeat,NDArray indptr,NDArray indices, NDArray out`,
+//     std::vector<NDArray> out_aux) {
+//   // TODO(zihao): format tuning
+//   SparseFormat format = SparseFormat::kCSC
+//   const auto& bcast = CalcBcastOff(op, ufeat, efeat);
+//   const auto partial_csr = CSRMatrix(indptr->shape[0] - 1,
+// 				     indices->shape[0],
+// 				     indptr,
+// 				     indices)
+  
+//   ATEN_XPU_SWITCH_CUDA(graph->Context().device_type, XPU, "SpMM", {
+//     ATEN_ID_TYPE_SWITCH(graph->DataType(), IdType, {
+//       ATEN_FLOAT_TYPE_SWITCH_16BITS(out->dtype, Dtype, XPU, "Feature data", {
+//         if (format == SparseFormat::kCSC) {
+//           SpMMCsr<XPU, IdType, Dtype>(
+//                                       op, reduce, bcast, partial_csr, ufeat, efeat, out,E_Redir,
+//                                       out_aux);
+//         } else if (format == SparseFormat::kCOO) {
+//           SpMMCoo<XPU, IdType, Dtype>(
+//               op, reduce, bcast, graph->GetCOOMatrix(0), ufeat, efeat, out,
+//               out_aux);
+//         } else {
+//           LOG(FATAL) << "SpMM only supports CSC and COO formats";
+//         }
+//       });
+//     });
+//   });
+// }
+
+  
 /** @brief Generalized segmented dense Matrix-Matrix Multiplication. */
 void SegmentMM(
     const NDArray A, const NDArray B, NDArray C, const NDArray seglen_A,
@@ -541,6 +575,38 @@ DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSpMM")
       SpMM(op, reduce_op, graph.sptr(), U, E, V, E_Redir,{ArgU, ArgE});
     });
 
+
+
+// DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelSpMMPartial")
+//     .set_body([](DGLArgs args, DGLRetValue* rv) {
+//       HeteroGraphRef graph = args[0];
+//       const std::string op = args[1];
+//       const std::string reduce_op = args[2];
+//       NDArray U = args[3];
+//       NDArray E = args[4];
+//       NDArray src_nodes = args[5];
+//       NDArray edges = args[6];
+//       NDArray tgt_nodes = args[7];      
+//       NDArray V = args[8];
+//       NDArray ArgU = args[9];
+//       NDArray ArgE = args[10];
+//       CheckCtx(
+//                graph->Context(), {U, E, V, src_nodes,edges,tgt_nodes,ArgU, ArgE},
+//                {"U_data", "E_data", "out", "src_nodes","edges","tgt_nodes","Arg_U", "Arg_E"});
+//       CheckContiguous(
+//                       {U, E, V, src_nodes,edges,tgt_nodes,ArgU, ArgE},
+// 		      {"U_data", "E_data", "out", "src_nodes","edges","tgt_nodes","Arg_U", "Arg_E"});
+//       CHECK_EQ(graph->NumEdgeTypes(), 1);
+//       auto pair =
+//           graph->meta_graph()->FindEdge(0);  // only one etype in the graph.
+//       const dgl_type_t src_vtype = pair.first;
+//       const dgl_type_t dst_vtype = pair.second;
+
+        
+//       SpMMPartial(op, reduce_op, graph.sptr(), U, E, src_nodes,edges,tgt_nodes,V ,{ArgU, ArgE});
+//     });
+
+  
 DGL_REGISTER_GLOBAL("sparse._CAPI_DGLKernelGATHERMM")
     .set_body([](DGLArgs args, DGLRetValue* rv) {
       NDArray A = args[0];

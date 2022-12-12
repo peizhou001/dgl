@@ -155,7 +155,8 @@ def invoke_udf_reduce(graph, func, msgdata, *, orig_nid=None):
             newshape = (len(node_bkt), deg) + F.shape(msg)[1:]
             maildata[k] = F.reshape(msg, newshape)
         # invoke udf
-        nbatch = NodeBatch(graph, orig_nid_bkt, ntype, ndata_bkt, msgs=maildata)
+        nbatch = NodeBatch(graph, orig_nid_bkt, ntype,
+                           ndata_bkt, msgs=maildata)
         bkt_rsts.append(func(nbatch))
 
     # prepare a result frame
@@ -302,6 +303,7 @@ def invoke_gsddmm(graph, func):
 
 def invoke_gspmm(
         graph, mfunc, rfunc, *, srcdata=None, dstdata=None, edata=None, efeats_redirected=None,
+        src_nodes=None, edges=None, tgt_nodes=None
 ):
     """Invoke g-SPMM computation on the graph.
 
@@ -348,7 +350,8 @@ def invoke_gspmm(
             lhs_target, _, rhs_target = mfunc.name.split("_", 2)
             x = data_dict_to_list(graph, x, mfunc, lhs_target)
             y = data_dict_to_list(graph, y, mfunc, rhs_target)
-        z = op(graph, x, y, efeats_redirected=efeats_redirected)
+        z = op(graph, x, y, efeats_redirected=efeats_redirected,
+               src_nodes=src_nodes, edges=edges, tgt_nodes=tgt_nodes)
     else:
         x = alldata[mfunc.target][mfunc.in_field]
         op = getattr(ops, "{}_{}".format(mfunc.name, rfunc.name))
@@ -357,8 +360,31 @@ def invoke_gspmm(
                 x = data_dict_to_list(graph, x, mfunc, "u")
             else:  # "copy_e"
                 x = data_dict_to_list(graph, x, mfunc, "e")
-        z = op(graph, x, efeats_redirected)
+        z = op(graph, x, efeats_redirected, src_nodes=src_nodes,
+               edges=edges, tgt_nodes=tgt_nodes)
     return {rfunc.out_field: z}
+
+
+def message_passing_partial(g, mfunc, rfunc, afunc,
+                            edge_feats_dict, node_feats_dict,
+                            src_nodes, edges, tgt_nodes):
+    if (
+        is_builtin(mfunc)
+        and is_builtin(rfunc)
+        and getattr(ops, "{}_{}".format(mfunc.name, rfunc.name), None)
+        is not None
+    ):
+        # invoke fused message passing
+        ndata = invoke_gspmm(g, mfunc, rfunc,
+                             srcdata=node_feats_dict,
+                             dstdata=node_feats_dict,
+                             edata=edge_feats_dict,
+                             src_nodes = src_nodes,
+                             edges = edges,
+                             tgt_nodes = tgt_nodes)
+    else:
+        raise DGLError("partial message passing is only supported for"
+                       "builting message and aggregation")
 
 
 def message_passing(g, mfunc, rfunc, afunc, efeats_redirected=None):
@@ -387,7 +413,8 @@ def message_passing(g, mfunc, rfunc, afunc, efeats_redirected=None):
         is not None
     ):
         # invoke fused message passing
-        ndata = invoke_gspmm(g, mfunc, rfunc, efeats_redirected=efeats_redirected)
+        ndata = invoke_gspmm(
+            g, mfunc, rfunc, efeats_redirected=efeats_redirected)
     else:
         # invoke message passing in two separate steps
         # message phase
