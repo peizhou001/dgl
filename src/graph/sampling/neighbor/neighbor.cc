@@ -281,7 +281,8 @@ HeteroSubgraph SampleNeighborsFused(
       << "Number of fanout values must match the number of edge types.";
   CHECK_EQ(prob_or_mask.size(), hg->NumEdgeTypes())
       << "Number of probability tensors must match the number of edge types.";
-
+  CHECK_EQ(hg->NumEdgeTypes(),1) << "Fused sampling only supports graphs with one edge type";
+  
   DGLContext ctx = aten::GetContextOf(nodes);
 
   std::vector<HeteroGraphPtr> subrels(hg->NumEdgeTypes());
@@ -325,8 +326,9 @@ HeteroSubgraph SampleNeighborsFused(
       }
 
       subrels[etype] = UnitGraph::CreateFromCSC(
-						hg->GetRelationGraph(etype)->NumVertexTypes(),
+						2,
 						sampled_csr,CSC_CODE);
+      induced_edges[etype] = sampled_csr.data;       
     }
   }
 

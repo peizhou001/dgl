@@ -33,6 +33,7 @@ __all__ = [
     'to_cugraph'
 ]
 
+
 def graph(data,
           ntype=None, etype=None,
           *,
@@ -158,10 +159,10 @@ def graph(data,
     """
     # Deprecated arguments
     if ntype is not None:
-        raise DGLError('The ntype argument is deprecated for dgl.graph. To construct ' \
+        raise DGLError('The ntype argument is deprecated for dgl.graph. To construct '
                        'a graph with named node types, use dgl.heterograph.')
     if etype is not None:
-        raise DGLError('The etype argument is deprecated for dgl.graph. To construct ' \
+        raise DGLError('The etype argument is deprecated for dgl.graph. To construct '
                        'a graph with named edge types, use dgl.heterograph.')
 
     if isinstance(data, spmatrix):
@@ -190,6 +191,7 @@ def graph(data,
 
     return g.to(device)
 
+
 def bipartite(data,
               utype='_U', etype='_E', vtype='_V',
               num_nodes=None,
@@ -203,10 +205,12 @@ def bipartite(data,
         "('{}', '{}', '{}')".format(utype, etype, vtype) +
         ' : data} to create a bipartite graph instead.')
 
+
 def hetero_from_relations(rel_graphs, num_nodes_per_type=None):
     """DEPRECATED: use dgl.heterograph instead."""
     raise DGLError('dgl.hetero_from_relations is deprecated.\n\n'
                    'Use dgl.heterograph instead.')
+
 
 def hetero_from_shared_memory(name):
     """Create a heterograph from shared memory with the given name.
@@ -225,6 +229,7 @@ def hetero_from_shared_memory(name):
     """
     g, ntypes, etypes = heterograph_index.create_heterograph_from_shared_memory(name)
     return DGLGraph(g, ntypes, etypes)
+
 
 def heterograph(data_dict,
                 num_nodes_dict=None,
@@ -381,6 +386,7 @@ def heterograph(data_dict,
     retg = DGLGraph(hgidx, ntypes, etypes)
 
     return retg.to(device)
+
 
 def create_block(data_dict, num_src_nodes=None, num_dst_nodes=None, idtype=None, device=None):
     """Create a message flow graph (MFG) as a :class:`DGLBlock` object.
@@ -563,6 +569,9 @@ def create_block(data_dict, num_src_nodes=None, num_dst_nodes=None, idtype=None,
     etypes = []
     rel_graphs = []
     for srctype, etype, dsttype in relations:
+        print('srctype', srctype)
+        print('etype', etype)
+        print('dsttype', dsttype)
         meta_edges_src.append(srctype_dict[srctype])
         meta_edges_dst.append(dsttype_dict[dsttype])
         etypes.append(etype)
@@ -579,7 +588,8 @@ def create_block(data_dict, num_src_nodes=None, num_dst_nodes=None, idtype=None,
         metagraph, [rgrh._graph for rgrh in rel_graphs], num_nodes_per_type)
     retg = DGLBlock(hgidx, (srctypes, dsttypes), etypes)
 
-    return retg.to(device)
+    return retg.to(device), metagraph, hgidx, srctypes, dsttypes, etypes, meta_edges_src, meta_edges_dst, num_nodes_per_type
+
 
 def block_to_graph(block):
     """Convert a message flow graph (MFG) as a :class:`DGLBlock` object to a :class:`DGLGraph`.
@@ -623,6 +633,7 @@ def block_to_graph(block):
             block.edges[srctype, etype, dsttype].data)
 
     return retg
+
 
 def to_heterogeneous(G, ntypes, etypes, ntype_field=NTYPE,
                      etype_field=ETYPE, metagraph=None):
@@ -772,7 +783,7 @@ def to_heterogeneous(G, ntypes, etypes, ntype_field=NTYPE,
     # canonical edge type j. We can then group the edges of the same type together.
     if metagraph is None:
         canonical_etids, _, etype_remapped = \
-                utils.make_invmap(list(tuple(_) for _ in edge_ctids), False)
+            utils.make_invmap(list(tuple(_) for _ in edge_ctids), False)
         etype_mask = (etype_remapped[None, :] == np.arange(len(canonical_etids))[:, None])
     else:
         ntypes_invmap = {nt: i for i, nt in enumerate(ntypes)}
@@ -799,7 +810,7 @@ def to_heterogeneous(G, ntypes, etypes, ntype_field=NTYPE,
                      dict(zip(ntypes, ntype_count)),
                      idtype=idtype, device=device)
 
-    ntype2ngrp = {ntype : node_groups[ntid] for ntid, ntype in enumerate(ntypes)}
+    ntype2ngrp = {ntype: node_groups[ntid] for ntid, ntype in enumerate(ntypes)}
 
     # features
     for key, data in G.ndata.items():
@@ -826,6 +837,7 @@ def to_heterogeneous(G, ntypes, etypes, ntype_field=NTYPE,
 
     return hg
 
+
 def to_hetero(G, ntypes, etypes, ntype_field=NTYPE, etype_field=ETYPE,
               metagraph=None):
     """Convert the given homogeneous graph to a heterogeneous graph.
@@ -835,6 +847,7 @@ def to_hetero(G, ntypes, etypes, ntype_field=NTYPE, etype_field=ETYPE,
     dgl_warning("dgl.to_hetero is deprecated. Please use dgl.to_heterogeneous")
     return to_heterogeneous(G, ntypes, etypes, ntype_field=ntype_field,
                             etype_field=etype_field, metagraph=metagraph)
+
 
 def to_homogeneous(G, ndata=None, edata=None, store_type=True, return_count=False):
     """Convert a heterogeneous graph to a homogeneous graph and return.
@@ -991,6 +1004,7 @@ def to_homogeneous(G, ndata=None, edata=None, store_type=True, return_count=Fals
     else:
         return retg
 
+
 def to_homo(G):
     """Convert the given heterogeneous graph to a homogeneous graph.
 
@@ -998,6 +1012,7 @@ def to_homo(G):
     """
     dgl_warning("dgl.to_homo is deprecated. Please use dgl.to_homogeneous")
     return to_homogeneous(G)
+
 
 def from_scipy(sp_mat,
                eweight_name=None,
@@ -1087,6 +1102,7 @@ def from_scipy(sp_mat,
     if eweight_name is not None:
         g.edata[eweight_name] = F.tensor(sp_mat.data)
     return g.to(device)
+
 
 def bipartite_from_scipy(sp_mat,
                          utype, etype, vtype,
@@ -1181,6 +1197,7 @@ def bipartite_from_scipy(sp_mat,
     if eweight_name is not None:
         g.edata[eweight_name] = F.tensor(sp_mat.data)
     return g.to(device)
+
 
 def from_networkx(nx_graph,
                   node_attrs=None,
@@ -1348,6 +1365,7 @@ def from_networkx(nx_graph,
 
     return g.to(device)
 
+
 def bipartite_from_networkx(nx_graph,
                             utype, etype, vtype,
                             u_attrs=None, e_attrs=None, v_attrs=None,
@@ -1486,8 +1504,8 @@ def bipartite_from_networkx(nx_graph,
     # Separately relabel the source and destination nodes.
     top_nodes = sorted(top_nodes)
     bottom_nodes = sorted(bottom_nodes)
-    top_map = {n : i for i, n in enumerate(top_nodes)}
-    bottom_map = {n : i for i, n in enumerate(bottom_nodes)}
+    top_map = {n: i for i, n in enumerate(top_nodes)}
+    bottom_map = {n: i for i, n in enumerate(bottom_nodes)}
 
     # Get the node tensors and the number of nodes
     (sparse_fmt, arrays), urange, vrange = utils.graphdata2tensors(
@@ -1549,6 +1567,7 @@ def bipartite_from_networkx(nx_graph,
             g.edata[attr] = F.copy_to(_batcher(attr_dict[attr]), g.device)
 
     return g.to(device)
+
 
 def to_networkx(g, node_attrs=None, edge_attrs=None):
     """Convert a homogeneous graph to a NetworkX graph and return.
@@ -1620,7 +1639,9 @@ def to_networkx(g, node_attrs=None, edge_attrs=None):
             attr.update({key: F.squeeze(feat_dict[key], 0) for key in edge_attrs})
     return nx_graph
 
+
 DGLGraph.to_networkx = to_networkx
+
 
 def to_cugraph(g):
     """Convert a DGL graph to a :class:`cugraph.Graph` and return.
@@ -1657,7 +1678,7 @@ def to_cugraph(g):
 
     if g.device.type != 'cuda':
         raise DGLError(f"Cannot convert a {g.device.type} graph to cugraph." +
-                        "Call g.to('cuda') first.")
+                       "Call g.to('cuda') first.")
     if not g.is_homogeneous:
         raise DGLError("dgl.to_cugraph only supports homogeneous graphs.")
 
@@ -1670,14 +1691,16 @@ def to_cugraph(g):
     edgelist = g.edges()
     src_ser = cudf.from_dlpack(F.zerocopy_to_dlpack(edgelist[0]))
     dst_ser = cudf.from_dlpack(F.zerocopy_to_dlpack(edgelist[1]))
-    cudf_data = cudf.DataFrame({'source':src_ser, 'destination':dst_ser})
+    cudf_data = cudf.DataFrame({'source': src_ser, 'destination': dst_ser})
     g_cugraph = cugraph.Graph(directed=True)
     g_cugraph.from_cudf_edgelist(cudf_data,
                                  source='source',
                                  destination='destination')
     return g_cugraph
 
+
 DGLGraph.to_cugraph = to_cugraph
+
 
 def from_cugraph(cugraph_graph):
     """Create a graph from a :class:`cugraph.Graph` object.
@@ -1722,13 +1745,14 @@ def from_cugraph(cugraph_graph):
     edges = cugraph_graph.edges()
     src_t = F.zerocopy_from_dlpack(edges['src'].to_dlpack())
     dst_t = F.zerocopy_from_dlpack(edges['dst'].to_dlpack())
-    g = graph((src_t,dst_t))
+    g = graph((src_t, dst_t))
 
     return g
 
 ############################################################
 # Internal APIs
 ############################################################
+
 
 def create_from_edges(sparse_fmt, arrays,
                       utype, etype, vtype,
