@@ -176,9 +176,8 @@ def _gen_spmm_func(binary_op, reduce_op):
     )
     docstring = _attach_zerodeg_note(docstring, reduce_op)
 
-    def func(g, x, y, efeats_redirected=None, src_nodes=None, edges=None, tgt_nodes=None):
-        return gspmm(g, binary_op, reduce_op, x, y, efeats_redirected,
-                     src_nodes=src_nodes, edges=edges, tgt_nodes=tgt_nodes)
+    def func(g, x, y, efeats_redirected=None):
+        return gspmm(g, binary_op, reduce_op, x, y, efeats_redirected)
 
     func.__name__ = name
     func.__doc__ = docstring
@@ -219,13 +218,12 @@ def _gen_copy_reduce_func(binary_op, reduce_op):
         reduce_op,
     )
 
-    def func(g, x, efeats_redirected=None, src_nodes=None, edges=None, tgt_nodes=None):
+    def func(g, x, efeats_redirected=None):
         if binary_op == "copy_u":
-            return gspmm(g, "copy_lhs", reduce_op, x, None, efeats_redirected=efeats_redirected,
-                         src_nodes=src_nodes, edges=edges, tgt_nodes=tgt_nodes)
+            return gspmm(g, "copy_lhs", reduce_op, x, None, efeats_redirected=efeats_redirected)
+
         else:
-            return gspmm(g, "copy_rhs", reduce_op, None, x, efeats_redirected=efeats_redirected,
-                         src_nodes=src_nodes, edges=edges, tgt_nodes=tgt_nodes)
+            return gspmm(g, "copy_rhs", reduce_op, None, x, efeats_redirected=efeats_redirected)
 
     func.__name__ = name
     func.__doc__ = docstring(binary_op)

@@ -9,6 +9,9 @@
 #include <dgl/array.h>
 #include <dgl/runtime/parallel_for.h>
 #include <dmlc/omp.h>
+#include <dmlc/logging.h>
+#include <x86intrin.h>
+
 
 #include <algorithm>
 #include <functional>
@@ -105,6 +108,9 @@ CSRMatrix CSRRowWisePickFused(
     CSRMatrix mat, IdArray rows, int64_t num_picks, bool replace,
     PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
+  uint64_t startTick, endTick;
+  startTick = __rdtsc();
+  
   const IdxType* indptr = static_cast<IdxType*>(mat.indptr->data);
   const IdxType* indices = static_cast<IdxType*>(mat.indices->data);
   const IdxType* data =
@@ -115,7 +121,8 @@ CSRMatrix CSRRowWisePickFused(
   const auto& idtype = mat.indptr->dtype;
 
 
-  IdArray mapping = Full(-1,mat.num_rows,sizeof(IdxType) * 8, ctx);
+  IdArray mapping = Full(-1,mat.num_rows, ctx);
+  //IdArray mapping = IdArray::Empty({mat.num_rows},idtype,ctx);
   IdxType* mapping_data = mapping.Ptr<IdxType>();
   
   
@@ -147,7 +154,7 @@ CSRMatrix CSRRowWisePickFused(
   // runtime::parallel_for does not handle exceptions well (directly aborts when
   // an exception pops up). It runs faster though because there is less
   // scheduling.  Need to handle exceptions better.
-  IdArray picked_row, picked_col, picked_idx;
+  IdArray  picked_col, picked_idx;
 
   IdArray block_csr_indptr = IdArray::Empty({num_rows + 1}, idtype, ctx);      
   IdxType *block_csr_indptr_data = block_csr_indptr.Ptr<IdxType>();
@@ -185,13 +192,11 @@ CSRMatrix CSRRowWisePickFused(
       for (int t = 0; t < num_threads; ++t) {
         global_prefix[t + 1] += global_prefix[t];
       }
-      picked_row = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
       picked_col = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
       picked_idx = IdArray::Empty({global_prefix[num_threads]}, idtype, ctx);
     }
 
 #pragma omp barrier
-    IdxType* picked_rdata = picked_row.Ptr<IdxType>();
     IdxType* picked_cdata = picked_col.Ptr<IdxType>();
     IdxType* picked_idata = picked_idx.Ptr<IdxType>();
 
@@ -201,8 +206,8 @@ CSRMatrix CSRRowWisePickFused(
     for (int64_t i = start_i; i < end_i; ++i) {
       const IdxType rid = rows_data[i];
       const int64_t local_i = i - start_i;
-      block_csr_indptr_data[i] = local_prefix[local_i] + thread_offset;
-      mapping_data[rid] = i;
+      //      block_csr_indptr_data[i] = local_prefix[local_i] + thread_offset;
+      //      mapping_data[rid] = i;
       
       
       const IdxType off = indptr[rid];
@@ -217,7 +222,6 @@ CSRMatrix CSRRowWisePickFused(
           rid, off, len, num_picks, indices, data, picked_idata + row_offset);
       for (int64_t j = 0; j < num_picks; ++j) {
         const IdxType picked = picked_idata[row_offset + j];
-        picked_rdata[row_offset + j] = i;
         picked_cdata[row_offset + j] = indices[picked];
         picked_idata[row_offset + j] = data ? data[picked] : picked;
       }
@@ -225,19 +229,21 @@ CSRMatrix CSRRowWisePickFused(
   }
   block_csr_indptr_data[num_rows] = global_prefix.back();
   int64_t last_compact_index = num_rows;
-  IdxType* cdata = picked_col.Ptr<IdxType>();  
-  for(int64_t i = 0; i < picked_col->shape[0];++i)
-    {
-      IdxType current_mapping = mapping_data[cdata[i]];
-      if(current_mapping == -1)
-	{
-	  cdata[i] = last_compact_index;
-	  mapping_data[cdata[i]] = last_compact_index;
-	  ++last_compact_index;
-	}
-      else
-	cdata[i] = current_mapping;
-    }
+  // IdxType* cdata = picked_col.Ptr<IdxType>();  
+  // for(int64_t i = 0; i < picked_col->shape[0];++i)
+  //   {
+  //     IdxType current_mapping = mapping_data[cdata[i]];
+  //     if(current_mapping == -1)
+  // 	{
+  // 	  cdata[i] = last_compact_index;
+  // 	  mapping_data[cdata[i]] = last_compact_index;
+  // 	  ++last_compact_index;
+  // 	}
+  //     else
+  // 	cdata[i] = current_mapping;
+  //   }
+  endTick = __rdtsc();
+  LOG(INFO) << "fused pick = " << (endTick - startTick);
   
   return CSRMatrix(
       num_rows, last_compact_index,
@@ -258,6 +264,9 @@ COOMatrix CSRRowWisePick(
     CSRMatrix mat, IdArray rows, int64_t num_picks, bool replace,
     PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
+  uint64_t startTick, endTick;
+  startTick = __rdtsc();
+
   const IdxType* indptr = static_cast<IdxType*>(mat.indptr->data);
   const IdxType* indices = static_cast<IdxType*>(mat.indices->data);
   const IdxType* data =
@@ -365,7 +374,10 @@ COOMatrix CSRRowWisePick(
   }
 
   const int64_t new_len = global_prefix.back();
+  endTick = __rdtsc();
+  LOG(INFO) << "Unfused pick = " << (endTick - startTick);
 
+  
   return COOMatrix(
       mat.num_rows, mat.num_cols,
       picked_row.CreateView({new_len}, picked_row->dtype),

@@ -153,10 +153,9 @@ def _cast_if_autocast_enabled(*args):
 
 class GSpMM(th.autograd.Function):
     @staticmethod
-    def forward(ctx, gidx, op, reduce_op, X, Y, efeats_redirected_indices,
-                src_nodes, edges, tgt_nodes):
+    def forward(ctx, gidx, op, reduce_op, X, Y, efeats_redirected_indices):
         out, (argX, argY) = _gspmm(gidx, op, reduce_op,
-                                   X, Y, efeats_redirected_indices, src_nodes, edges, tgt_nodes)
+                                   X, Y, efeats_redirected_indices)
         reduce_last = _need_reduce_last_dim(X, Y)
         X_shape = X.shape if X is not None else None
         Y_shape = Y.shape if Y is not None else None
@@ -1018,8 +1017,7 @@ class GATHERMM(th.autograd.Function):
         return A_grad, B_grad, None, None
 
 
-def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=None,
-          src_nodes=None, edges=None, tgt_nodes=None):
+def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=None):
     if op == "sub":
         op = "add"
         rhs_data = -rhs_data
@@ -1027,7 +1025,7 @@ def gspmm(gidx, op, reduce_op, lhs_data, rhs_data, efeats_redirected_indices=Non
         op = "mul"
         rhs_data = 1.0 / rhs_data
     args = _cast_if_autocast_enabled(gidx, op, reduce_op, lhs_data,
-                                     rhs_data, efeats_redirected_indices, src_nodes, edges, tgt_nodes)
+                                     rhs_data, efeats_redirected_indices)
     with autocast(enabled=False):
         return GSpMM.apply(*args)
 

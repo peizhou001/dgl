@@ -154,48 +154,47 @@ def _edge_softmax_forward(gidx, e, op):
     return myout
 
 
-def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None,
-           src_nodes=None, edges=None, tgt_nodes=None):
+def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None):
     r"""Generalized Sparse Matrix Multiplication interface. It takes the result of
-    :attr:`op` on source node feature and edge feature, leads to a message on edge.
-    Then aggregates the message by :attr:`reduce_op` on destination nodes.
+      :attr:`op` on source node feature and edge feature, leads to a message on edge.
+      Then aggregates the message by :attr:`reduce_op` on destination nodes.
 
-    .. math::
-        x_v = \psi_{(u, v, e)\in \mathcal{G}}(\rho(x_u, x_e))
+      .. math::
+          x_v = \psi_{(u, v, e)\in \mathcal{G}}(\rho(x_u, x_e))
 
-    where :math:`x_v` is the returned feature on destination nodes, and :math`x_u`,
-    :math:`x_e` refers to :attr:`u`, :attr:`e` respectively. :math:`\rho` means binary
-    operator :attr:`op` and :math:`\psi` means reduce operator :attr:`reduce_op`,
-    :math:`\mathcal{G}` is the graph we apply gspmm on: :attr:`g`.
+      where :math:`x_v` is the returned feature on destination nodes, and :math`x_u`,
+      :math:`x_e` refers to :attr:`u`, :attr:`e` respectively. :math:`\rho` means binary
+      operator :attr:`op` and :math:`\psi` means reduce operator :attr:`reduce_op`,
+      :math:`\mathcal{G}` is the graph we apply gspmm on: :attr:`g`.
 
-    Note that this function does not handle gradients.
+      Note that this function does not handle gradients.
 
-    Parameters
-    ----------
-    gidx : HeteroGraphIndex
-        The input graph index.
-    op : str
-        The binary op's name, could be ``add``, ``sub``, ``mul``, ``div``, ``copy_lhs``,
-        ``copy_rhs``.
-    reduce_op : str
-        Reduce operator, could be ``sum``, ``max``, ``min``.
-    u : tensor or None
-        The feature on source nodes, could be None if op is ``copy_rhs``.
-    e : tensor or None
-        The feature on edges, could be None if op is ``copy_lhs``.
+      Parameters
+      ----------
+      gidx : HeteroGraphIndex
+          The input graph index.
+      op : str
+          The binary op's name, could be ``add``, ``sub``, ``mul``, ``div``, ``copy_lhs``,
+          ``copy_rhs``.
+      reduce_op : str
+          Reduce operator, could be ``sum``, ``max``, ``min``.
+      u : tensor or None
+          The feature on source nodes, could be None if op is ``copy_rhs``.
+      e : tensor or None
+          The feature on edges, could be None if op is ``copy_lhs``.
 
-    Returns
-    -------
-    tuple
-        The returned tuple is composed of two elements:
-        - The first element refers to the result tensor.
-        - The second element refers to a tuple composed of arg_u and arg_e
-          (which is useful when reducer is `min`/`max`).
+      Returns
+      -------
+      tuple
+          The returned tuple is composed of two elements:
+          - The first element refers to the result tensor.
+          - The second element refers to a tuple composed of arg_u and arg_e
+            (which is useful when reducer is `min`/`max`).
 
-    Notes
-    -----
-    This function does not handle gradients.
-    """
+      Notes
+      -----
+      This function does not handle gradients.
+      """
     if gidx.number_of_etypes() != 1:
         raise DGLError("We only support gspmm on graph with one edge type")
 
@@ -244,15 +243,8 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None,
     u_shp = F.shape(u) if use_u else (0,)
     e_shp = F.shape(e) if use_e else (0,)
 
-    partial_propagation = (src_nodes is not None
-                           and tgt_nodes is not None
-                           and edges is not None)
-
-    if partial_propagation:
-        n_tgt_nodes = len(tgt_nodes)
-    else:
-        _, dsttype = gidx.metagraph.find_edge(0)
-        n_tgt_nodes = gidx.number_of_nodes(dsttype)
+    _, dsttype = gidx.metagraph.find_edge(0)
+    n_tgt_nodes = gidx.number_of_nodes(dsttype)
 
     v_shp = (n_tgt_nodes,) + infer_broadcast_shape(
         op, u_shp[1:], e_shp[1:]
@@ -267,33 +259,18 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None,
             arg_e = F.zeros(v_shp, idtype, ctx)
     arg_u_nd = to_dgl_nd_for_write(arg_u)
     arg_e_nd = to_dgl_nd_for_write(arg_e)
-    if partial_propagation:
-        _CAPI_DGLKernelSpMMPartial(
+    if gidx.number_of_edges(0) > 0:
+        _CAPI_DGLKernelSpMM(
             gidx,
             op,
             reduce_op,
             to_dgl_nd(u if use_u else None),
             to_dgl_nd(e if use_e else None),
-            to_dgl_nd(src_nodes),
-            to_dgl_nd(edges),
-            to_dgl_nd(tgt_nodes),
             to_dgl_nd_for_write(v),
+            to_dgl_nd(efeats_redirected_indices),
             arg_u_nd,
             arg_e_nd,
         )
-    else:
-        if gidx.number_of_edges(0) > 0:
-            _CAPI_DGLKernelSpMM(
-                gidx,
-                op,
-                reduce_op,
-                to_dgl_nd(u if use_u else None),
-                to_dgl_nd(e if use_e else None),
-                to_dgl_nd_for_write(v),
-                to_dgl_nd(efeats_redirected_indices),
-                arg_u_nd,
-                arg_e_nd,
-            )
     # NOTE(zihao): actually we can avoid the following step, because arg_*_nd
     # refers to the data that stores arg_*. After we call _CAPI_DGLKernelSpMM,
     # arg_* should have already been changed. But we found this doesn't work
@@ -301,8 +278,10 @@ def _gspmm(gidx, op, reduce_op, u, e, efeats_redirected_indices=None,
     # all zero).
     # The workaround is proposed by Jinjing, and we still need to investigate
     # where the problem is.
-    arg_u = None if arg_u is None else F.zerocopy_from_dgl_ndarray(arg_u_nd)
-    arg_e = None if arg_e is None else F.zerocopy_from_dgl_ndarray(arg_e_nd)
+    arg_u = None if arg_u is None else F.zerocopy_from_dgl_ndarray(
+        arg_u_nd)
+    arg_e = None if arg_e is None else F.zerocopy_from_dgl_ndarray(
+        arg_e_nd)
     # To deal with scalar node/edge features.
     if (expand_u or not use_u) and (expand_e or not use_e):
         v = F.squeeze(v, -1)

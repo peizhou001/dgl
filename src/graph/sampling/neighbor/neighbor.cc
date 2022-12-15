@@ -9,6 +9,9 @@
 #include <dgl/packed_func_ext.h>
 #include <dgl/runtime/container.h>
 #include <dgl/sampling/neighbor.h>
+#include <dmlc/logging.h>
+#include <x86intrin.h>
+
 
 #include <tuple>
 #include <utility>
@@ -195,6 +198,8 @@ HeteroSubgraph SampleNeighbors(
   CHECK_EQ(prob_or_mask.size(), hg->NumEdgeTypes())
       << "Number of probability tensors must match the number of edge types.";
 
+  uint64_t startTick, endTick;
+  
   DGLContext ctx = aten::GetContextOf(nodes);
 
   std::vector<HeteroGraphPtr> subrels(hg->NumEdgeTypes());
@@ -219,6 +224,7 @@ HeteroSubgraph SampleNeighbors(
       // sample from one relation graph
       auto req_fmt = (dir == EdgeDir::kOut) ? CSR_CODE : CSC_CODE;
       auto avail_fmt = hg->SelectFormat(etype, req_fmt);
+      startTick = __rdtsc();
       switch (avail_fmt) {
         case SparseFormat::kCOO:
           if (dir == EdgeDir::kIn) {
@@ -248,10 +254,13 @@ HeteroSubgraph SampleNeighbors(
         default:
           LOG(FATAL) << "Unsupported sparse format.";
       }
-
+      endTick = __rdtsc();
+      LOG(INFO) << "UNfused sampling ticks = " << (endTick - startTick);
+      
       subrels[etype] = UnitGraph::CreateFromCOO(
           hg->GetRelationGraph(etype)->NumVertexTypes(), sampled_coo.num_rows,
           sampled_coo.num_cols, sampled_coo.row, sampled_coo.col);
+      
       induced_edges[etype] = sampled_coo.data;
     }
   }
@@ -275,6 +284,9 @@ HeteroSubgraph SampleNeighborsFused(
     const std::vector<NDArray>& prob_or_mask,
     const std::vector<IdArray>& exclude_edges, bool replace) {
   // sanity check
+  uint64_t startTick, endTick;
+  
+  
   CHECK_EQ(nodes.size(), hg->NumVertexTypes())
       << "Number of node ID tensors must match the number of node types.";
   CHECK_EQ(fanouts.size(), hg->NumEdgeTypes())
@@ -307,6 +319,8 @@ HeteroSubgraph SampleNeighborsFused(
       // sample from one relation graph
       auto req_fmt = (dir == EdgeDir::kOut) ? CSR_CODE : CSC_CODE;
       auto avail_fmt = hg->SelectFormat(etype, req_fmt);
+      startTick = __rdtsc();
+
       switch (avail_fmt) {
         case SparseFormat::kCSR:
           CHECK(dir == EdgeDir::kOut)
@@ -324,10 +338,13 @@ HeteroSubgraph SampleNeighborsFused(
         default:
           LOG(FATAL) << "Unsupported sparse format.";
       }
+      endTick = __rdtsc();
+      LOG(INFO) << "fused sampling ticks = " << (endTick - startTick);
+
 
       subrels[etype] = UnitGraph::CreateFromCSC(
 						2,
-						sampled_csr,CSC_CODE);
+						sampled_csr);
       induced_edges[etype] = sampled_csr.data;       
     }
   }
