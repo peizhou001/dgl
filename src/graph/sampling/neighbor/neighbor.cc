@@ -9,9 +9,6 @@
 #include <dgl/packed_func_ext.h>
 #include <dgl/runtime/container.h>
 #include <dgl/sampling/neighbor.h>
-#include <dmlc/logging.h>
-#include <x86intrin.h>
-
 
 #include <tuple>
 #include <utility>
@@ -198,8 +195,6 @@ HeteroSubgraph SampleNeighbors(
   CHECK_EQ(prob_or_mask.size(), hg->NumEdgeTypes())
       << "Number of probability tensors must match the number of edge types.";
 
-  uint64_t startTick, endTick;
-  
   DGLContext ctx = aten::GetContextOf(nodes);
 
   std::vector<HeteroGraphPtr> subrels(hg->NumEdgeTypes());
@@ -224,7 +219,6 @@ HeteroSubgraph SampleNeighbors(
       // sample from one relation graph
       auto req_fmt = (dir == EdgeDir::kOut) ? CSR_CODE : CSC_CODE;
       auto avail_fmt = hg->SelectFormat(etype, req_fmt);
-      startTick = __rdtsc();
       switch (avail_fmt) {
         case SparseFormat::kCOO:
           if (dir == EdgeDir::kIn) {
@@ -254,13 +248,10 @@ HeteroSubgraph SampleNeighbors(
         default:
           LOG(FATAL) << "Unsupported sparse format.";
       }
-      endTick = __rdtsc();
-      LOG(INFO) << "UNfused sampling ticks = " << (endTick - startTick);
-      
+
       subrels[etype] = UnitGraph::CreateFromCOO(
           hg->GetRelationGraph(etype)->NumVertexTypes(), sampled_coo.num_rows,
           sampled_coo.num_cols, sampled_coo.row, sampled_coo.col);
-      
       induced_edges[etype] = sampled_coo.data;
     }
   }
@@ -279,14 +270,11 @@ HeteroSubgraph SampleNeighbors(
 
 
 HeteroSubgraph SampleNeighborsFused(
-    const HeteroGraphPtr hg, const std::vector<IdArray>& nodes,
-    const std::vector<int64_t>& fanouts, EdgeDir dir,
-    const std::vector<NDArray>& prob_or_mask,
-    const std::vector<IdArray>& exclude_edges, bool replace) {
+                                    const HeteroGraphPtr hg, const std::vector<IdArray>& nodes,IdArray mapping,
+                                    const std::vector<int64_t>& fanouts, EdgeDir dir,
+                                    const std::vector<NDArray>& prob_or_mask,
+                                    const std::vector<IdArray>& exclude_edges, bool replace) {
   // sanity check
-  uint64_t startTick, endTick;
-  
-  
   CHECK_EQ(nodes.size(), hg->NumVertexTypes())
       << "Number of node ID tensors must match the number of node types.";
   CHECK_EQ(fanouts.size(), hg->NumEdgeTypes())
@@ -297,62 +285,60 @@ HeteroSubgraph SampleNeighborsFused(
   
   DGLContext ctx = aten::GetContextOf(nodes);
 
-  std::vector<HeteroGraphPtr> subrels(hg->NumEdgeTypes());
-  std::vector<IdArray> induced_edges(hg->NumEdgeTypes());
-  for (dgl_type_t etype = 0; etype < hg->NumEdgeTypes(); ++etype) {
-    auto pair = hg->meta_graph()->FindEdge(etype);
-    const dgl_type_t src_vtype = pair.first;
-    const dgl_type_t dst_vtype = pair.second;
-    const IdArray nodes_ntype =
+  std::vector<HeteroGraphPtr> subrels(1);
+  std::vector<IdArray> induced_edges(1);
+  IdArray induced_vertices;
+  
+  auto pair = hg->meta_graph()->FindEdge(0);
+  const dgl_type_t src_vtype = pair.first;
+  const dgl_type_t dst_vtype = pair.second;
+  const IdArray nodes_ntype =
         nodes[(dir == EdgeDir::kOut) ? src_vtype : dst_vtype];
-    const int64_t num_nodes = nodes_ntype->shape[0];
+  const int64_t num_nodes = nodes_ntype->shape[0];
 
-    if (num_nodes == 0 || fanouts[etype] == 0) {
-      // Nothing to sample for this etype, create a placeholder relation graph
-      subrels[etype] = UnitGraph::Empty(
-          hg->GetRelationGraph(etype)->NumVertexTypes(),
-          hg->NumVertices(src_vtype), hg->NumVertices(dst_vtype),
-          hg->DataType(), ctx);
-      induced_edges[etype] = aten::NullArray(hg->DataType(), ctx);
-    } else {
-      CSRMatrix sampled_csr;
-      // sample from one relation graph
-      auto req_fmt = (dir == EdgeDir::kOut) ? CSR_CODE : CSC_CODE;
-      auto avail_fmt = hg->SelectFormat(etype, req_fmt);
-      startTick = __rdtsc();
-
-      switch (avail_fmt) {
-        case SparseFormat::kCSR:
-          CHECK(dir == EdgeDir::kOut)
-              << "Cannot sample out edges on CSC matrix.";
-          sampled_csr = aten::CSRRowWiseSamplingFused(
-              hg->GetCSRMatrix(etype), nodes_ntype, fanouts[etype],
-              prob_or_mask[etype], replace);
-          break;
-        case SparseFormat::kCSC:
-          CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
-          sampled_csr = aten::CSRRowWiseSamplingFused(
-              hg->GetCSCMatrix(etype), nodes_ntype, fanouts[etype],
-              prob_or_mask[etype], replace);
-          break;
-        default:
-          LOG(FATAL) << "Unsupported sparse format.";
-      }
-      endTick = __rdtsc();
-      LOG(INFO) << "fused sampling ticks = " << (endTick - startTick);
-
-
-      subrels[etype] = UnitGraph::CreateFromCSC(
-						2,
-						sampled_csr);
-      induced_edges[etype] = sampled_csr.data;       
+  if (num_nodes ==0 || fanouts[0] == 0) {
+    // Nothing to sample for this etype, create a placeholder relation graph
+    subrels[0] = UnitGraph::Empty(
+                                      hg->GetRelationGraph(0)->NumVertexTypes(),
+                                      hg->NumVertices(src_vtype), hg->NumVertices(dst_vtype),
+                                      hg->DataType(), ctx);
+    induced_edges[0] = aten::NullArray(hg->DataType(), ctx);
+  } else {
+    std::pair<CSRMatrix,IdArray> sampled_csr;
+    // sample from one relation graph
+    auto req_fmt = (dir == EdgeDir::kOut) ? CSR_CODE : CSC_CODE;
+    auto avail_fmt = hg->SelectFormat(0, req_fmt);
+    switch (avail_fmt) {
+    case SparseFormat::kCSR:
+      CHECK(dir == EdgeDir::kOut)
+        << "Cannot sample out edges on CSC matrix.";
+      sampled_csr = aten::CSRRowWiseSamplingFused(
+                                                  hg->GetCSRMatrix(0), nodes_ntype, mapping,fanouts[0],
+                                                  prob_or_mask[0], replace);
+      break;
+    case SparseFormat::kCSC:
+      CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
+      sampled_csr = aten::CSRRowWiseSamplingFused(
+                                                  hg->GetCSCMatrix(0), nodes_ntype, mapping,fanouts[0],
+                                                  prob_or_mask[0], replace);
+      break;
+    default:
+      LOG(FATAL) << "Unsupported sparse format.";
     }
+
+    subrels[0] = UnitGraph::CreateFromCSC(
+                                              2,
+                                              sampled_csr.first,ALL_CODE);
+    induced_edges[0]  =sampled_csr.first.data;
+    induced_vertices = sampled_csr.second;
   }
+
 
   HeteroSubgraph ret;
   ret.graph =
       CreateHeteroGraph(hg->meta_graph(), subrels, hg->NumVerticesPerType());
-  ret.induced_vertices.resize(hg->NumVertexTypes());
+  ret.induced_vertices.resize(1);
+  ret.induced_vertices[0] = induced_vertices;
   ret.induced_edges = std::move(induced_edges);
   if (!exclude_edges.empty()) {
     return ExcludeCertainEdges(ret, exclude_edges).first;
@@ -667,12 +653,13 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsFused")
     .set_body([](DGLArgs args, DGLRetValue* rv) {
       HeteroGraphRef hg = args[0];
       const auto& nodes = ListValueToVector<IdArray>(args[1]);
-      IdArray fanouts_array = args[2];
+      IdArray mapping = args[2];
+      IdArray fanouts_array = args[3];
       const auto& fanouts = fanouts_array.ToVector<int64_t>();
-      const std::string dir_str = args[3];
-      const auto& prob_or_mask = ListValueToVector<NDArray>(args[4]);
-      const auto& exclude_edges = ListValueToVector<IdArray>(args[5]);
-      const bool replace = args[6];
+      const std::string dir_str = args[4];
+      const auto& prob_or_mask = ListValueToVector<NDArray>(args[5]);
+      const auto& exclude_edges = ListValueToVector<IdArray>(args[6]);
+      const bool replace = args[7];
 
       CHECK(dir_str == "in" || dir_str == "out")
           << "Invalid edge direction. Must be \"in\" or \"out\".";
@@ -680,7 +667,7 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsFused")
 
       std::shared_ptr<HeteroSubgraph> subg(new HeteroSubgraph);
       *subg = sampling::SampleNeighborsFused(
-          hg.sptr(), nodes, fanouts, dir, prob_or_mask, exclude_edges, replace);
+                                             hg.sptr(), nodes, mapping,fanouts, dir, prob_or_mask, exclude_edges, replace);
 
       *rv = HeteroSubgraphRef(subg);
     });

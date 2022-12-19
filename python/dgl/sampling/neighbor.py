@@ -1,9 +1,12 @@
 """Neighbor sampling APIs"""
 
+import torch
 from .._ffi.function import _init_api
 from .. import backend as F
-from ..base import DGLError, EID
-from ..heterograph import DGLGraph
+from ..base import DGLError, EID, NID
+from ..heterograph import DGLGraph, DGLBlock
+from .. import heterograph_index
+from .. import graph_index
 from .. import ndarray as nd
 from .. import utils
 from .utils import EidExcluder
@@ -341,6 +344,11 @@ def sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
 def _sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
                       replace=False, copy_ndata=True, copy_edata=True,
                       _dist_training=False, exclude_edges=None, fused=False):
+
+    if fused and len(g.ntypes) > 1:
+        raise DGLError(
+            "Fused sampling only supported for homogeneous graphs.")
+
     if not isinstance(nodes, dict):
         if len(g.ntypes) > 1:
             raise DGLError(
@@ -392,17 +400,29 @@ def _sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
                 excluded_edges_all_t.append(nd.array([], ctx=ctx))
 
     if fused:
+        mapping = torch.LongTensor(g.number_of_nodes()).fill_(-1)
         subgidx = _CAPI_DGLSampleNeighborsFused(
-            g._graph, nodes_all_types, fanout_array, edge_dir, prob_arrays,
+            g._graph, nodes_all_types, F.to_dgl_nd(mapping), fanout_array, edge_dir, prob_arrays,
             excluded_edges_all_t, replace)
+
+        induced_nodes = subgidx.induced_nodes[0]
+        seed_nodes = list(nodes.values())[0]
+        print('induced nodes', induced_nodes.size())
+        metagraph = graph_index.from_coo(2, [0], [1], True)
+        index = utils.Index([len(induced_nodes), len(seed_nodes)])
+        hgidx = heterograph_index.create_heterograph_from_relations(
+            metagraph, [subgidx.graph], index)
+        ret = DGLBlock(hgidx, ['_N', '_N'], ['_E'])
+        ret.srcdata[NID] = induced_nodes
+        ret.edata[EID] = subgidx.induced_edges[0]
 
     else:
         subgidx = _CAPI_DGLSampleNeighbors(
             g._graph, nodes_all_types, fanout_array, edge_dir, prob_arrays,
             excluded_edges_all_t, replace)
+        ret = DGLGraph(subgidx.graph, g.ntypes, g.etypes)
 
     induced_edges = subgidx.induced_edges
-    ret = DGLGraph(subgidx.graph, g.ntypes, g.etypes)
 
     # handle features
     # (TODO) (BarclayII) DGL distributed fails with bus error, freezes, or other

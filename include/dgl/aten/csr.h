@@ -508,8 +508,8 @@ COOMatrix CSRRowWiseSampling(
     NDArray prob_or_mask = NDArray(), bool replace = true);
 
 
-CSRMatrix CSRRowWiseSamplingFused(
-    CSRMatrix mat, IdArray rows, int64_t num_samples,
+std::pair<CSRMatrix,IdArray> CSRRowWiseSamplingFused(
+                                  CSRMatrix mat, IdArray rows, IdArray mapping, int64_t num_samples,
     NDArray prob_or_mask = NDArray(), bool replace = true);
   
 /**

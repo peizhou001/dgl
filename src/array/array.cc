@@ -583,15 +583,15 @@ COOMatrix CSRRowWiseSampling(
 }
 
 
-CSRMatrix CSRRowWiseSamplingFused(
-    CSRMatrix mat, IdArray rows, int64_t num_samples, NDArray prob_or_mask,
-    bool replace) {
-  CSRMatrix ret;
+std::pair<CSRMatrix,IdArray> CSRRowWiseSamplingFused(
+                                  CSRMatrix mat, IdArray rows,IdArray mapping, int64_t num_samples, NDArray prob_or_mask,
+                                  bool replace) {
+  std::pair<CSRMatrix,IdArray> ret;
   if (IsNullArray(prob_or_mask)) {
     ATEN_CSR_SWITCH_CUDA_UVA(
         mat, rows, XPU, IdType, "CSRRowWiseSamplingUniformFused", {
           ret = impl::CSRRowWiseSamplingUniformFused<XPU, IdType>(
-              mat, rows, num_samples, replace);
+                                                                  mat, rows, mapping,num_samples, replace);
         });
   } else {
     // prob_or_mask is pinned and rows on GPU is valid
@@ -602,7 +602,7 @@ CSRMatrix CSRRowWiseSamplingFused(
       ATEN_FLOAT_INT8_UINT8_TYPE_SWITCH(
           prob_or_mask->dtype, FloatType, "probability or mask", {
             ret = impl::CSRRowWiseSamplingFused<XPU, IdType, FloatType>(
-                mat, rows, num_samples, prob_or_mask, replace);
+                                                                        mat, rows, mapping,num_samples, prob_or_mask, replace);
           });
     });
   }

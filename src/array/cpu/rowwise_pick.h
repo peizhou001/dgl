@@ -11,6 +11,7 @@
 #include <dmlc/omp.h>
 #include <dmlc/logging.h>
 #include <x86intrin.h>
+#include <fstream>
 
 
 #include <algorithm>
@@ -104,9 +105,9 @@ using EtypeRangePickFn = std::function<void(
 // OpenMP parallelization on rows because each row performs computation
 // independently.
 template <typename IdxType>
-CSRMatrix CSRRowWisePickFused(
-    CSRMatrix mat, IdArray rows, int64_t num_picks, bool replace,
-    PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
+std::pair<CSRMatrix,IdArray> CSRRowWisePickFused(
+                              CSRMatrix mat, IdArray rows,IdArray mapping, int64_t num_picks, bool replace,
+                              PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
   uint64_t startTick, endTick;
   startTick = __rdtsc();
@@ -121,10 +122,10 @@ CSRMatrix CSRRowWisePickFused(
   const auto& idtype = mat.indptr->dtype;
 
 
-  IdArray mapping = Full(-1,mat.num_rows, ctx);
-  //IdArray mapping = IdArray::Empty({mat.num_rows},idtype,ctx);
   IdxType* mapping_data = mapping.Ptr<IdxType>();
-  
+  //  std::ofstream d_file;
+  //  d_file.open("/home/hesham/fused_debug");
+
   
   // To leverage OMP parallelization, we create two arrays to store
   // picked src and dst indices. Each array is of length num_rows * num_picks.
@@ -158,6 +159,8 @@ CSRMatrix CSRRowWisePickFused(
 
   IdArray block_csr_indptr = IdArray::Empty({num_rows + 1}, idtype, ctx);      
   IdxType *block_csr_indptr_data = block_csr_indptr.Ptr<IdxType>();
+  std::vector<IdxType> src_nodes(num_rows);
+
   
 #pragma omp parallel num_threads(num_threads)
   {
@@ -205,9 +208,10 @@ CSRMatrix CSRRowWisePickFused(
 
     for (int64_t i = start_i; i < end_i; ++i) {
       const IdxType rid = rows_data[i];
+      src_nodes[i] = rid;
       const int64_t local_i = i - start_i;
-      //      block_csr_indptr_data[i] = local_prefix[local_i] + thread_offset;
-      //      mapping_data[rid] = i;
+      block_csr_indptr_data[i] = local_prefix[local_i] + thread_offset;
+      mapping_data[rid] = i;
       
       
       const IdxType off = indptr[rid];
@@ -228,26 +232,33 @@ CSRMatrix CSRRowWisePickFused(
     }
   }
   block_csr_indptr_data[num_rows] = global_prefix.back();
-  int64_t last_compact_index = num_rows;
-  // IdxType* cdata = picked_col.Ptr<IdxType>();  
-  // for(int64_t i = 0; i < picked_col->shape[0];++i)
-  //   {
-  //     IdxType current_mapping = mapping_data[cdata[i]];
-  //     if(current_mapping == -1)
-  // 	{
-  // 	  cdata[i] = last_compact_index;
-  // 	  mapping_data[cdata[i]] = last_compact_index;
-  // 	  ++last_compact_index;
-  // 	}
-  //     else
-  // 	cdata[i] = current_mapping;
-  //   }
-  endTick = __rdtsc();
-  LOG(INFO) << "fused pick = " << (endTick - startTick);
+
   
-  return CSRMatrix(
+  int64_t last_compact_index = num_rows;
+  IdxType* cdata = picked_col.Ptr<IdxType>();  
+  for(int64_t i = 0; i < picked_col->shape[0];++i)
+    {
+      IdxType current_mapping = mapping_data[cdata[i]];
+      if(current_mapping == -1)
+	{
+          src_nodes.push_back(cdata[i]);
+          //          d_file<<cdata[i]<<std::endl;
+	  mapping_data[cdata[i]] = last_compact_index;
+	  cdata[i] = last_compact_index;
+	  ++last_compact_index;
+	}
+      else
+	cdata[i] = current_mapping;
+    }
+  endTick = __rdtsc();
+  //  for(auto & z : src_nodes)
+  // d_file<<z<<std::endl;
+  
+  LOG(INFO) << "fused pick = " << (endTick - startTick);
+
+  return std::make_pair(CSRMatrix(
       num_rows, last_compact_index,
-      block_csr_indptr,picked_col,picked_idx);
+      block_csr_indptr,picked_col,picked_idx),  NDArray::FromVector(src_nodes));
 }
 
 
