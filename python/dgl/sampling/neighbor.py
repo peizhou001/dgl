@@ -400,14 +400,15 @@ def _sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
                 excluded_edges_all_t.append(nd.array([], ctx=ctx))
 
     if fused:
-        mapping = torch.LongTensor(g.number_of_nodes()).fill_(-1)
+        if '__mapping' not in g.ndata:
+            g.ndata['__mapping'] = torch.LongTensor(g.number_of_nodes()).fill_(-1)
+        mapping = g.ndata['__mapping']
         subgidx = _CAPI_DGLSampleNeighborsFused(
             g._graph, nodes_all_types, F.to_dgl_nd(mapping), fanout_array, edge_dir, prob_arrays,
             excluded_edges_all_t, replace)
-
         induced_nodes = subgidx.induced_nodes[0]
+        mapping[induced_nodes] = -1
         seed_nodes = list(nodes.values())[0]
-        print('induced nodes', induced_nodes.size())
         metagraph = graph_index.from_coo(2, [0], [1], True)
         index = utils.Index([len(induced_nodes), len(seed_nodes)])
         hgidx = heterograph_index.create_heterograph_from_relations(
