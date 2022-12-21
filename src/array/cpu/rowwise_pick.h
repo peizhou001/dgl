@@ -109,8 +109,8 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFused(
                               CSRMatrix mat, IdArray rows,IdArray mapping, int64_t num_picks, bool replace,
                               PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
-  uint64_t startTick, endTick;
-  startTick = __rdtsc();
+  //uint64_t startTick, endTick;
+  //startTick = __rdtsc();
   
   const IdxType* indptr = static_cast<IdxType*>(mat.indptr->data);
   const IdxType* indices = static_cast<IdxType*>(mat.indices->data);
@@ -250,11 +250,11 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFused(
       else
 	cdata[i] = current_mapping;
     }
-  endTick = __rdtsc();
+  //  endTick = __rdtsc();
   //  for(auto & z : src_nodes)
   // d_file<<z<<std::endl;
   
-  LOG(INFO) << "fused pick = " << (endTick - startTick);
+  //  LOG(INFO) << "fused pick = " << (endTick - startTick);
 
   return std::make_pair(CSRMatrix(
       num_rows, last_compact_index,
@@ -275,8 +275,8 @@ COOMatrix CSRRowWisePick(
     CSRMatrix mat, IdArray rows, int64_t num_picks, bool replace,
     PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
-  uint64_t startTick, endTick;
-  startTick = __rdtsc();
+  //  uint64_t startTick, endTick;
+  //  startTick = __rdtsc();
 
   const IdxType* indptr = static_cast<IdxType*>(mat.indptr->data);
   const IdxType* indices = static_cast<IdxType*>(mat.indices->data);
@@ -385,8 +385,8 @@ COOMatrix CSRRowWisePick(
   }
 
   const int64_t new_len = global_prefix.back();
-  endTick = __rdtsc();
-  LOG(INFO) << "Unfused pick = " << (endTick - startTick);
+  //  endTick = __rdtsc();
+  //  LOG(INFO) << "Unfused pick = " << (endTick - startTick);
 
   
   return COOMatrix(
