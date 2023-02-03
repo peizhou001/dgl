@@ -289,7 +289,7 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFusedCritical(
 // OpenMP parallelization on rows because each row performs computation
 // independently.
 template <typename IdxType>
-std::pair<CSRMatrix,IdArray> CSRRowWisePickFusedBackward(
+std::pair<std::pair<CSRMatrix,CSRMatrix>,IdArray> CSRRowWisePickFusedBackward(
                               CSRMatrix mat, IdArray rows,IdArray mapping, int64_t num_picks, bool replace,
                               PickFn<IdxType> pick_fn, NumPicksFn<IdxType> num_picks_fn) {
   using namespace aten;
@@ -344,7 +344,7 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFusedBackward(
   IdArray block_csr_indptr = IdArray::Empty({num_rows + 1}, idtype, ctx);      
   IdxType *block_csr_indptr_data = block_csr_indptr.Ptr<IdxType>();
   std::vector<IdxType> src_nodes(num_rows);
-  std::vector<std::vector<IdxType>> csr_data(num_rows);  
+  std::vector<std::vector<IdxType>> csr_data_backward(num_rows);  
 
   
 #pragma omp parallel num_threads(num_threads)
@@ -424,20 +424,22 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFusedBackward(
   
   for(int64_t i = 0; i < picked_col->shape[0];++i)
     {
-      while(i >= block_csr_indptr_data[current_row])
+      while(i >= block_csr_indptr_data[current_row+1])
 	++current_row;
       IdxType current_mapping = mapping_data[cdata[i]];
       if(current_mapping == -1)
 	{
           src_nodes.push_back(cdata[i]);
-          //          d_file<<cdata[i]<<std::endl;
 	  mapping_data[cdata[i]] = last_compact_index;
 	  cdata[i] = last_compact_index;
 	  ++last_compact_index;
-	  //	  csr_data.push_back(std::vector<IdxType>(
+	  csr_data_backward.push_back(std::vector<IdxType>{current_row});
 	}
       else
-	cdata[i] = current_mapping;
+	{
+	  cdata[i] = current_mapping;
+	  csr_data_backward[current_mapping].push_back(current_row);
+	}
     }
   //  endTick = __rdtsc();
   //  for(auto & z : src_nodes)
@@ -445,9 +447,65 @@ std::pair<CSRMatrix,IdArray> CSRRowWisePickFusedBackward(
   
   //  LOG(INFO) << "fused pick = " << (endTick - startTick);
 
-  return std::make_pair(CSRMatrix(
-      num_rows, last_compact_index,
-      block_csr_indptr,picked_col,picked_idx),  NDArray::FromVector(src_nodes));
+  const int64_t num_rows_backward =  last_compact_index;
+  const int64_t num_cols_backward =  num_rows;
+  IdArray picked_col_backward = IdArray::Empty({picked_col->shape[0]}, idtype, ctx);
+  IdArray block_csr_indptr_backward = IdArray::Empty({num_rows_backward + 1}, idtype, ctx);      
+
+  IdxType* picked_cdata_backward = picked_col_backward.Ptr<IdxType>();  
+  IdxType *block_csr_indptr_data_backward = block_csr_indptr_backward.Ptr<IdxType>();
+
+  
+#pragma omp parallel num_threads(num_threads)
+  {
+    const int thread_id = omp_get_thread_num();
+    const int64_t start_i =
+        thread_id * (num_rows_backward / num_threads) +
+        std::min(static_cast<int64_t>(thread_id), num_rows_backward % num_threads);
+    const int64_t end_i =
+        (thread_id + 1) * (num_rows_backward / num_threads) +
+        std::min(static_cast<int64_t>(thread_id + 1), num_rows_backward % num_threads);
+    const int64_t num_local = end_i - start_i;
+    
+    std::unique_ptr<int64_t[]> local_prefix(new int64_t[num_local + 1]);
+    local_prefix[0] = 0;
+    for (int64_t i = start_i; i < end_i; ++i) {
+      // build prefix-sum
+      const int64_t local_i = i - start_i;
+      const IdxType len = csr_data_backward[i].size();
+
+      local_prefix[local_i + 1] = local_prefix[local_i] + len;
+    }
+    //reuse and overwrite the global_prefix
+    global_prefix[thread_id + 1] = local_prefix[num_local];
+#pragma omp barrier
+#pragma omp master
+    {
+      for (int t = 0; t < num_threads; ++t) {
+        global_prefix[t + 1] += global_prefix[t];
+      }
+    }
+#pragma omp barrier
+      const IdxType thread_offset = global_prefix[thread_id];
+      
+      for (int64_t i = start_i; i < end_i; ++i) {
+	const int64_t local_i = i - start_i;
+	block_csr_indptr_data_backward[i] = local_prefix[local_i] + thread_offset;
+	memcpy(picked_cdata_backward + local_prefix[local_i] + thread_offset,
+	       &csr_data_backward[i][0],sizeof(IdxType) * csr_data_backward[i].size());
+      }
+  }
+
+  block_csr_indptr_data_backward[num_rows_backward] = global_prefix.back();
+
+  return std::make_pair(std::make_pair(CSRMatrix(
+						 num_rows, last_compact_index,
+						 block_csr_indptr,picked_col,picked_idx),
+				       CSRMatrix(
+						 num_rows_backward, num_cols_backward,
+						 block_csr_indptr_backward,picked_col_backward,
+						 picked_idx)),
+			NDArray::FromVector(src_nodes));
 }
 
   

@@ -511,6 +511,10 @@ COOMatrix CSRRowWiseSampling(
 std::pair<CSRMatrix,IdArray> CSRRowWiseSamplingFused(
                                   CSRMatrix mat, IdArray rows, IdArray mapping, int64_t num_samples,
     NDArray prob_or_mask = NDArray(), bool replace = true);
+
+std::pair<std::pair<CSRMatrix,CSRMatrix>,IdArray> CSRRowWiseSamplingFusedBackward(
+                                  CSRMatrix mat, IdArray rows, IdArray mapping, int64_t num_samples,
+    NDArray prob_or_mask = NDArray(), bool replace = true);
   
 /**
  * @brief Randomly select a fixed number of non-zero entries for each edge type

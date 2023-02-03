@@ -20,6 +20,13 @@ HeteroSubgraph SampleNeighborsFused(
     const std::vector<int64_t>& fanouts, EdgeDir dir,
     const std::vector<FloatArray>& probability,
     const std::vector<IdArray>& exclude_edges, bool replace = true);
+
+
+HeteroSubgraph SampleNeighborsFusedBackward(
+    const HeteroGraphPtr hg, const std::vector<IdArray>& nodes,
+    const std::vector<int64_t>& fanouts, EdgeDir dir,
+    const std::vector<FloatArray>& probability,
+    const std::vector<IdArray>& exclude_edges, bool replace = true);
   
   
 /**
