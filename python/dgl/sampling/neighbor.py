@@ -191,7 +191,7 @@ DGLGraph.sample_etype_neighbors = utils.alias_func(sample_etype_neighbors)
 def sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
                      replace=False, copy_ndata=True, copy_edata=True,
                      _dist_training=False, exclude_edges=None,
-                     output_device=None, fused=False):
+                     output_device=None, fused=False, fused_backward=False):
     """Sample neighboring edges of the given nodes and return the induced subgraph.
 
     For each node, a number of inbound (or outbound when ``edge_dir == 'out'``) edges
@@ -331,11 +331,12 @@ def sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
         frontier = _sample_neighbors(
             g, nodes, fanout, edge_dir=edge_dir, prob=prob,
             replace=replace, copy_ndata=copy_ndata, copy_edata=copy_edata,
-            exclude_edges=exclude_edges, fused=fused)
+            exclude_edges=exclude_edges, fused=fused, fused_backward=fused_backward)
     else:
         frontier = _sample_neighbors(
             g, nodes, fanout, edge_dir=edge_dir, prob=prob,
-            replace=replace, copy_ndata=copy_ndata, copy_edata=copy_edata, fused=fused)
+            replace=replace, copy_ndata=copy_ndata, copy_edata=copy_edata, fused=fused,
+            fused_backward=fused_backward)
         if exclude_edges is not None:
             eid_excluder = EidExcluder(exclude_edges)
             frontier = eid_excluder(frontier)
@@ -344,7 +345,7 @@ def sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
 
 def _sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
                       replace=False, copy_ndata=True, copy_edata=True,
-                      _dist_training=False, exclude_edges=None, fused=False):
+                      _dist_training=False, exclude_edges=None, fused=False, fused_backward=False):
 
     if fused and len(g.ntypes) > 1:
         raise DGLError(
@@ -406,10 +407,17 @@ def _sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None,
             g.ndata[mapping_name] = torch.LongTensor(
                 g.number_of_nodes()).fill_(-1)
         mapping = g.ndata[mapping_name]
-        subgidx = _CAPI_DGLSampleNeighborsFused(
-            g._graph, nodes_all_types, F.to_dgl_nd(
-                mapping), fanout_array, edge_dir, prob_arrays,
-            excluded_edges_all_t, replace)
+        if fused_backward:
+            subgidx = _CAPI_DGLSampleNeighborsFusedBackward(
+                g._graph, nodes_all_types, F.to_dgl_nd(
+                    mapping), fanout_array, edge_dir, prob_arrays,
+                excluded_edges_all_t, replace)
+        else:
+            subgidx = _CAPI_DGLSampleNeighborsFused(
+                g._graph, nodes_all_types, F.to_dgl_nd(
+                    mapping), fanout_array, edge_dir, prob_arrays,
+                excluded_edges_all_t, replace)
+
         induced_nodes = subgidx.induced_nodes[0]
         mapping[induced_nodes] = -1
         seed_nodes = list(nodes.values())[0]
