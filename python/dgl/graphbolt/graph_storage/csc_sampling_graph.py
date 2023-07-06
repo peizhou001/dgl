@@ -379,6 +379,30 @@ class CSCSamplingGraph:
             self.sample_neighbors(unique_nodes, torch.LongTensor([-1])),
         )
 
+    
+    def split_fused_homogeneous_graph(self, sub_graph):
+        fused_rows = sub_graph.indices
+        num_per_column = sub_graph.indptr[1:] - sub_graph.indptr[:-1]
+        fused_columns = sub_graph.reverse_column_node_ids.repeat_interleave(num_per_column)
+        if (sub_graph.type_per_edge is None):
+            return (fused_rows, fused_columns)
+        else:
+            # will be changed to a object.
+            dict = {}
+            for etype, etype_id in self.metadata.edge_type_to_id.items():
+                src_ntype, _, dst_ntype = etype
+                src_ntype_id = self.metadata.node_type_to_id[src_ntype]
+                dst_ntype_id = self.metadata.node_type_to_id[dst_ntype]
+                mask = sub_graph.type_per_edge = etype_id
+                rows, columns = fused_rows[mask], fused_columns[mask]
+                # convert to heterogeneous id.
+                rows = rows - self.node_type_offset[src_ntype_id]
+                columns = columns - self.node_type_offset[dst_ntype_id]
+                # add reverse edge ids and node ids.
+                dict[etype] = (rows, columns)
+            return dict
+
+
     def copy_to_shared_memory(self, shared_memory_name: str):
         """Copy the graph to shared memory.
 
