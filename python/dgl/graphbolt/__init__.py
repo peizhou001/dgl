@@ -14,6 +14,7 @@ from .copy_to import *
 from .dataset import *
 from .dataloader import *
 from .subgraph_sampler import *
+from .link_neighbor_sampler import *
 
 
 def load_graphbolt():
